@@ -167,16 +167,18 @@ el de «Releases».
 * **Firmas:** sin un certificado, Windows avisa (SmartScreen) y macOS pide «Abrir igualmente». Firmar
   necesita un certificado de firma de código para Windows, y para macOS la cuenta de desarrollador de Apple
   con la notarización (de pago). No se ha hecho.
-* **macOS:** los paquetes aún no se han construido ni probado; la primera vez será en GitHub.
+* **macOS:** los paquetes se construyen y se comprueban en GitHub (`--comprobar` en el ejecutor); nadie los ha
+  abierto aún en un Mac.
 * **Mac con Intel:** va sin Numba mientras Numba no vuelva a publicar versiones para él.
 * **Linux:** el paquete lleva las bibliotecas del sistema donde se construye (Ubuntu 22.04), como todo
-  ejecutable de PyInstaller.
+  ejecutable de PyInstaller; también `libpulse.so.0`, que Qt Multimedia necesita (por eso se instala
+  `libpulse0` en el ejecutor).
 * **Tamaño:** el instalador de Windows ocupa unos 80 MB y el paquete de Linux unos 170 MB. llvmlite, de
   Numba, es lo que más pesa.
 
 ## Verificación
 
-* **Pruebas:** 39 nuevas en `tests/test_distribucion.py`.
+* **Pruebas:** 40 nuevas en `tests/test_distribucion.py`.
   * `user_cache_dir` en los tres sistemas, los ajustes del ejecutable, los argumentos del Finder y
     `--comprobar`;
   * los ficheros que pide abrir macOS, antes y después de haber ventana;
@@ -192,6 +194,12 @@ el de «Releases».
   instala solo para el usuario (menú Inicio y «Abrir con»), lo instalado pasa la comprobación y el
   desinstalador lo quita todo, también del registro. El de contraseña se niega sin ella e instala con ella.
 * **Flujo:** actionlint (con shellcheck) sin avisos.
+* **Primera ejecución en GitHub (18-10-2026,
+  [guerreroalonso/ARGUS](https://github.com/guerreroalonso/ARGUS)):** el contenido, la contraseña, Windows y los
+  dos Mac, bien, cada uno con su `--comprobar`. Fallaron el de Linux y las pruebas por lo mismo: Qt Multimedia no
+  se carga sin `libpulse.so.0`, que los ejecutores de GitHub no traen (en la nube estaba). Se instala `libpulse0`
+  (y `libxrandr2`, que pide el complemento de FFmpeg) en los dos trabajos. Además, si la publicación sigue en
+  borrador de una ejecución anterior, el flujo la pasa al commit nuevo (la etiqueta se crea al publicar).
 * **Paquete con contraseña de Linux:** el `.7z` no se abre con otra contraseña.
 * **El resto:** la batería completa de pruebas y ruff.
 

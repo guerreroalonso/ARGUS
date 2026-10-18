@@ -421,6 +421,18 @@ def test_the_workflow_builds_the_four_packages_from_the_lock():
     assert (ROOT / "uv.lock").is_file()
 
 
+def test_the_workflow_installs_what_qt_multimedia_needs_on_linux():
+    """Qt Multimedia (los vídeos de la cascada) necesita libpulse.so.0 del sistema: sin ella fallaban la comprobación
+    del ejecutable de Linux y la de las pruebas en la primera ejecución en GitHub (18-10-2026). PyInstaller la mete en
+    el paquete si está en el ordenador donde se construye."""
+    text = (PACKAGING / "github" / "ejecutables.yml").read_text(encoding="utf-8")
+    tests = text[text.index("\n  pruebas:"):text.index("\n  construir:")]
+    build = text[text.index("\n  construir:"):text.index("\n  publicar:")]
+    for job in (tests, build):
+        assert "libpulse0" in job and "libxrandr2" in job
+    draft = text[text.index("\n  borrador:"):text.index("\n  pruebas:")]
+    assert 'gh release edit "$TAG" --target "$GITHUB_SHA"' in draft  # un borrador que se repite va al commit nuevo
+
 def _workflow_step_script(text: str, step_name: str) -> str:
     """El «run: |» de un paso del flujo (sin un lector de YAML: el bloque que sigue, más sangrado que «run:»)."""
     lines = text.splitlines()
