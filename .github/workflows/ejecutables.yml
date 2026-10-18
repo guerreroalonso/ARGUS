@@ -1,0 +1,222 @@
+# Ejecutables de ARGUS para Windows, macOS y Linux, publicados en «Releases» del repositorio (0.17.0, ADR-022).
+#
+# GitHub solo ejecuta los flujos de .github/workflows: en el repositorio, este fichero va como
+# .github/workflows/ejecutables.yml. Esta es la copia de ARGUS; packaging/revisar_repo.py comprueba que las dos
+# sean iguales.
+#
+# Se lanza a mano (pestaña Actions > Ejecutables > Run workflow) o al subir una etiqueta vX.Y.Z que coincida con la
+# versión de pyproject.toml. En cada sistema: el entorno de Python sale de uv.lock (las mismas versiones con las que
+# se prueba ARGUS), PyInstaller hace el ejecutable, «ARGUS --comprobar» lo abre y lo prueba, y se hace el paquete
+# (packaging/construir.py). La publicación queda como borrador hasta que todo ha salido bien.
+#
+# Ajustes del repositorio (Settings > Secrets and variables > Actions):
+#   * secreto ARGUS_CLAVE: los paquetes llevan esa contraseña (instalador de Windows con los ficheros cifrados,
+#     .dmg cifrado, .7z cifrado en Linux). Sin él, el flujo se para antes de construir nada (el repositorio es
+#     público y los paquetes irían sin contraseña), salvo que la variable ARGUS_SIN_CLAVE valga «si»; también se
+#     para si la contraseña no es válida.
+#   * opcional, variable REPO_DESCARGAS (p. ej. «guerreroalonso/ARGUS-descargas») y secreto TOKEN_DESCARGAS (un token
+#     con permiso de escritura en ese repositorio): los paquetes se publican también allí, sin el código.
+name: Ejecutables
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ejecutables-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_VERSION: "0.12.18"
+  PYINSTALLER: "pyinstaller==6.22.3 pyinstaller-hooks-contrib==2026.8"
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  revisar:
+    name: Contenido del repositorio
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Nada de PENELOPE, PenGeomJar, DICOM ni compilados
+        run: python3 packaging/revisar_repo.py
+      - name: La contraseña de los paquetes (secreto ARGUS_CLAVE)
+        env:
+          ARGUS_CLAVE: ${{ secrets.ARGUS_CLAVE }}
+          SIN_CLAVE: ${{ vars.ARGUS_SIN_CLAVE }}
+        run: |
+          if [ -z "$ARGUS_CLAVE" ] && [ "$SIN_CLAVE" != "si" ]; then
+            echo "::error::Falta el secreto ARGUS_CLAVE (Settings > Secrets and variables > Actions): los paquetes irían sin contraseña. Para publicarlos sin ella, crea la variable ARGUS_SIN_CLAVE con el valor si."
+            exit 1
+          fi
+          python3 -B -c "import sys; sys.path.insert(0, 'packaging'); import construir; construir.package_password()"
+      - name: Versión
+        id: version
+        run: |
+          version=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::La etiqueta $GITHUB_REF_NAME no es la versión de pyproject.toml (v$version)"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+  borrador:
+    name: Borrador de la publicación
+    needs: revisar
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - name: Crear el borrador (si no existe ya la publicación)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.revisar.outputs.tag }}
+          VERSION: ${{ needs.revisar.outputs.version }}
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "La publicación $TAG ya existe: se le cambiarán los paquetes."
+          else
+            gh release create "$TAG" --draft --title "ARGUS $VERSION" --notes-file packaging/LEEME.txt \
+              --target "$GITHUB_SHA"
+          fi
+
+  pruebas:
+    name: Pruebas (Linux)
+    needs: revisar
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Bibliotecas que necesita Qt
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3 \
+            fonts-dejavu-core
+      - name: Entorno de Python (uv.lock)
+        run: |
+          python -m pip install "uv==$UV_VERSION"
+          uv sync --frozen --extra dev --python "$(python -c 'import sys; print(sys.executable)')"
+      - name: Pruebas
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: uv run --frozen --no-sync pytest -q -p no:cacheprovider
+
+  construir:
+    name: ${{ matrix.so }}
+    needs: [revisar, borrador]
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - so: Windows
+            runner: windows-2022
+          - so: macOS-AppleSilicon
+            runner: macos-15
+          - so: macOS-Intel  # Numba ya no publica versiones para los Mac con Intel: va sin él (más lento)
+            runner: macos-15-intel
+            sin_numba: true
+          - so: Linux-x86_64  # Ubuntu 22.04: el ejecutable vale para 22.04 y posteriores (glibc 2.35)
+            runner: ubuntu-22.04
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Bibliotecas del sistema (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb xauth libegl1 libgl1 libopengl0 libglx-mesa0 \
+            libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
+            libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 libxcb-xkb1 libfontconfig1 libdbus-1-3 p7zip-full \
+            fonts-dejavu-core
+      - name: Inno Setup (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $iscc = Get-ChildItem "${env:ProgramFiles(x86)}\Inno Setup *\ISCC.exe", "$env:ProgramFiles\Inno Setup *\ISCC.exe" -ErrorAction SilentlyContinue
+          if (-not $iscc) { choco install innosetup --no-progress -y }
+      - name: Entorno de Python (uv.lock) y PyInstaller
+        run: |
+          python -m pip install "uv==$UV_VERSION"
+          extra=()
+          if [ "${{ matrix.sin_numba }}" = "true" ]; then extra=(--no-install-package numba --no-install-package llvmlite); fi
+          uv sync --frozen --no-dev "${extra[@]}" --python "$(python -c 'import sys; print(sys.executable)')"
+          read -ra tools <<< "$PYINSTALLER"
+          uv pip install "${tools[@]}"
+      - name: Construir, comprobar y empaquetar
+        env:
+          ARGUS_CLAVE: ${{ secrets.ARGUS_CLAVE }}
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then py=.venv/Scripts/python.exe; else py=.venv/bin/python; fi
+          args=()
+          if [ "${{ matrix.sin_numba }}" = "true" ]; then args=(--sin-numba); fi
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            xvfb-run -a -s "-screen 0 1600x1000x24" "$py" packaging/construir.py "${args[@]}"
+          else
+            "$py" packaging/construir.py "${args[@]}"
+          fi
+      - name: Informe de la comprobación
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: comprobacion-${{ matrix.so }}
+          path: build/comprobacion-*.txt
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Subir el paquete a la publicación
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.revisar.outputs.tag }}
+        run: gh release upload "$TAG" dist/paquetes/* --clobber
+
+  publicar:
+    name: Publicar
+    needs: [revisar, pruebas, construir]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - name: Sumas SHA-256 y publicar
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.revisar.outputs.tag }}
+        run: |
+          mkdir paquetes
+          gh release download "$TAG" --dir paquetes --pattern "ARGUS-*"
+          (cd paquetes && sha256sum ARGUS-* > SHA256SUMS.txt && cat SHA256SUMS.txt)
+          gh release upload "$TAG" paquetes/SHA256SUMS.txt --clobber
+          gh release edit "$TAG" --draft=false --latest
+      - name: Copia en el repositorio de descargas
+        if: vars.REPO_DESCARGAS != ''
+        env:
+          GH_TOKEN: ${{ secrets.TOKEN_DESCARGAS }}
+          REPO: ${{ vars.REPO_DESCARGAS }}
+          TAG: ${{ needs.revisar.outputs.tag }}
+          VERSION: ${{ needs.revisar.outputs.version }}
+        run: |
+          if gh release view "$TAG" --repo "$REPO" > /dev/null 2>&1; then
+            gh release upload "$TAG" paquetes/* --repo "$REPO" --clobber
+          else
+            gh release create "$TAG" paquetes/* --repo "$REPO" --title "ARGUS $VERSION" \
+              --notes-file packaging/LEEME.txt --latest
+          fi
