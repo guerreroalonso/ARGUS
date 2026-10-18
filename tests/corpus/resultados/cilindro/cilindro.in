@@ -1,0 +1,29 @@
+TITLE  ARGUS corpus: cilindro (protones)
+       .
+SKPAR  4              [Primary particles: 1=e-, 2=ph, 3=e+, 4=h, 5=a]
+SPECTR 4.8E7 0.4                   [E bin: lower end and probability]
+SPECTR 4.9E7 0.6                   [E bin: lower end and probability]
+SPECTR 5.0E7 -1                    [E bin: lower end and probability]
+SPOSIT 0 0 -1                              [Coordinates of the source]
+SCONE  0 0 0                           [Conical beam; angles in deg]
+       .
+MFNAME water.mat                      [Material file, up to 20 chars]
+MSIMPA 1e5 1e4 1e5 0.05 0.05 1e4 1e4       [EABS(1:3),C1,C2,WCC,WCR]
+MSIMPH 1e5 1e5 1e5 0.05 0.05 1e4          [EABSH(1:3),C1H,C2H,WCCH]
+MSIMPN 1.0 500                                         [FNABS,FORCEN]
+       .
+GEOMFN cilindro.geo                  [Geometry file, up to 20 chars]
+       .
+NBE    0 0 100                       [Energy window and no. of bins]
+NBANGL 30 1               [No. of bins for the angles THETA and PHI]
+       .
+GRIDZ  0 3 30            [Z coords of the box vertices, no. of bins]
+GRIDR  5 10                  [Radius of the dose volume, no. of bins]
+       .
+EPROF  mcs-null.mcs            [Cross section table, up to 20 chars]
+EPROPM 4 1                           [Activating particle, material]
+       .
+DUMPTO dump.dmp                  [Generate this dump file, 20 chars]
+LTRACK 3                   [Generate shower files for visualisation]
+NSIMSH 1500                    [Desired number of simulated showers]
+TIME   2e9                         [Allotted simulation time, in sec]

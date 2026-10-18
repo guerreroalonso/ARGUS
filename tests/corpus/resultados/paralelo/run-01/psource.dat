@@ -1,0 +1,6 @@
+ #  Results from PENHMAIN. 
+ #  Source energy spectrum (discrete lines).
+ #  1st column: E (eV). 2nd column: probability.
+ #  3rd and 4th columns: simul. prob. limits (3SD).
+  3.200000E+04  7.600434E-02  6.479890E-02  8.520110E-02
+  6.617000E+05  9.239957E-01  9.147989E-01  9.352011E-01

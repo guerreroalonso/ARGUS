@@ -1,0 +1,19 @@
+ #  Results from PENHMAIN. Depth-dose distribution.
+ #  (integrated over X and Y within the volume of the dose box).
+ #  1st column: z coordinate (cm).
+ #  2nd column: depth-dose (eV/(g/cm^2)).
+ #  3rd column: statistical uncertainty (3 sigma).
+ #
+ #  NOTE: The calculated dose distribution is correct only when the 
+ #        Z bins have uniform mass density.
+ #
+  2.500000E-01  2.069470E+04  4.38E+03
+  7.500000E-01  2.389173E+04  4.74E+03
+  1.250000E+00  2.117315E+04  4.40E+03
+  1.750000E+00  1.943000E+04  4.06E+03
+  2.250000E+00  2.046474E+04  4.27E+03
+  2.750000E+00  2.259803E+04  4.65E+03
+  3.250000E+00  1.881899E+04  4.05E+03
+  3.750000E+00  2.077387E+04  4.43E+03
+  4.250000E+00  1.705195E+04  3.91E+03
+  4.750000E+00  1.739349E+04  3.94E+03

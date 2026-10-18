@@ -1,0 +1,8 @@
+# A table of the null molecular cross section.
+# It causes the scoring of the fluence map of activating particles.
+# E (eV) and molecular cross section (cm^2)
+1.0e3   0.0e0
+1.0e5   0.0e0
+1.0e7   0.0e0
+1.0e9   0.0e0
+1.0e11  0.0e0

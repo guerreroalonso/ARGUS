@@ -1,0 +1,13 @@
+ #  Results from CTDOSE.
+ #  Dose distribution along the central X axis
+ #  1st column: x (cm).
+ #  2nd column: dose (eV/g).
+ #  3rd column: statistical uncertainty (3 sigma).
+  5.000000E-01  2.145817E+01  3.06E+01
+  1.500000E+00  3.877070E+01  3.38E+01
+  2.500000E+00  1.246949E+03  2.24E+02
+  3.500000E+00  4.287347E+03  4.23E+02
+  4.500000E+00  4.171583E+03  4.22E+02
+  5.500000E+00  1.323447E+03  2.99E+02
+  6.500000E+00  9.308793E+01  6.88E+01
+  7.500000E+00  4.812801E+01  4.24E+01

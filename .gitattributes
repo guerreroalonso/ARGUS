@@ -1,0 +1,4 @@
+# Cada fichero se guarda en el repositorio tal como está, byte a byte (ADR-022): sin convertir los finales de línea.
+# Los .geo y .in de tests/corpus (de PENELOPE y PenGeomJar) llevan CRLF y las pruebas comparan bytes; los .bat
+# necesitan CRLF; el resto, LF. Git para Windows convertiría unos y otros según su configuración.
+* -text

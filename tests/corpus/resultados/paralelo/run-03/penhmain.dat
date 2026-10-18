@@ -1,0 +1,133 @@
+
+
+   **************************************************************
+   **   Program PENHMAIN.  Input data and run-time messages.   **
+   **************************************************************
+
+   Date and time: 30th Sep 2026. 16:20:24
+
+   ARGUS corpus: caja (paralelo)                                    
+
+   ---------------------------------------------------------------------------
+   >>>>>>  Geometry definition.
+   PENGEOM's geometry file: caja.geo            
+
+   ---------------------------------------------------------------------------
+   >>>>>>  Source description.
+
+   Primary particles: photons
+
+   Line spectrum:  I     E_I(eV)        P_I
+                ---------------------------------
+                   1  3.200000E+04  7.000000E-02
+                   2  6.617000E+05  8.510000E-01
+   
+
+   Max. energy of electrons/photons =  6.617000E+05 eV
+   Max. energy of heavier particles =  0.000000E+00 eV
+
+   **** Conical beam:
+   Beam axis direction:     THETA =  0.000000E+00 deg
+                              PHI =  0.000000E+00 deg
+   Beam semiaperture:       ALPHA =  8.000000E+00 deg
+
+   Coordinates of centre:     SX0 =  0.000000E+00 cm
+                              SY0 =  0.000000E+00 cm
+                              SZ0 = -5.000000E+00 cm
+
+   ---------------------------------------------------------------------------
+   >>>>>>  Material data and simulation parameters.
+
+   ****  1st material
+   Material data file: water.mat           
+   Electron absorption energy =  1.000000E+04 eV
+     Photon absorption energy =  1.000000E+03 eV
+   Positron absorption energy =  1.000000E+04 eV
+   Electron-positron simulation parameters:
+    C1 = 5.000000E-02,      C2 = 5.000000E-02
+   Wcc = 1.000000E+04 eV,  Wcr = 1.000000E+03 eV
+
+   ****  2nd material
+   Material data file: hueso.mat           
+   Electron absorption energy =  1.000000E+04 eV
+     Photon absorption energy =  1.000000E+03 eV
+   Positron absorption energy =  1.000000E+04 eV
+   Electron-positron simulation parameters:
+    C1 = 5.000000E-02,      C2 = 5.000000E-02
+   Wcc = 1.000000E+04 eV,  Wcr = 1.000000E+03 eV
+
+   ---------------------------------------------------------------------------
+   >>>>>>  Energy and angular distributions of emerging particles.
+   Energy window = ( 0.00000E+00, 6.61700E+05) eV
+   Number of energy bins =  100  (linear scale)
+       Polar angle: number of bins =  30  (linear scale)
+   Azimuthal angle: number of bins =   4
+
+   ---------------------------------------------------------------------------
+   >>>>>>  Impact detector # 1
+   Energy window = ( 1.00000E+03, 7.00000E+05) eV
+   Number of energy bins =   70  (linear scale)
+   Output energy spectrum: spc-impdet-01.dat   
+   Particles are transported through this detector
+   Active body =    2
+   Detected particles = all
+
+   ---------------------------------------------------------------------------
+   >>>>>>  Impact detector # 2
+   Energy window = ( 1.00000E+03, 7.00000E+05) eV
+   Number of energy bins =   50  (logarithmic scale)
+   Output energy spectrum: spc-impdet-02.dat   
+   Particles are transported through this detector
+   Output fluence distribution: fln-impdet-02.dat   
+   Particle age window = ( 0.00000E+00, 2.00000E-09) seconds
+   Number of age bins =   50  (linear scale)
+   Output age distribution: age-impdet-02.dat   
+   Active body =    3
+   Detected particles = all
+
+   ---------------------------------------------------------------------------
+   >>>>>>  Angular detector # 1
+   Angular intervals : theta_1 = 9.0000E+01 deg,  theta_2 = 1.8000E+02 deg
+                         phi_1 = 0.0000E+00 deg,    phi_2 = 3.6000E+02 deg
+   Energy window = ( 1.00000E+03, 7.00000E+05) eV
+   Number of energy bins =   70  (linear scale)
+   Detected particles = all
+   Output energy spectrum: spc-angdet-01.dat   
+
+   ---------------------------------------------------------------------------
+   >>>>>>  Angular detector # 2
+   Angular intervals : theta_1 = 0.0000E+00 deg,  theta_2 = 3.0000E+01 deg
+                         phi_1 = 0.0000E+00 deg,    phi_2 = 3.6000E+02 deg
+   Energy window = ( 1.00000E+03, 7.00000E+05) eV
+   Number of energy bins =   70  (linear scale)
+   Detected particles = photons
+   Output energy spectrum: spc-angdet-02.dat   
+
+   ---------------------------------------------------------------------------
+   >>>>>>  Energy-deposition detector # 1
+   Energy window = ( 0.00000E+00, 7.00000E+05) eV
+   Number of energy bins =  140  (linear scale)
+   Output energy spectrum: spc-enddet-01.dat   
+   Active body =    3
+
+   ---------------------------------------------------------------------------
+   >>>>>>  Dose distribution in a box.
+   XL = -5.000000E+00 cm,  XU =  5.000000E+00 cm,  NDBX =   5
+   YL = -5.000000E+00 cm,  YU =  5.000000E+00 cm,  NDBY =   5
+   ZL =  0.000000E+00 cm,  ZU =  5.000000E+00 cm,  NDBZ =  10
+
+   ---------------------------------------------------------------------------
+   >>>>>>  Job characteristics.
+   Write final counter values on the dump file: dump.dmp            
+   Dumping period: DUMPP = 3.000000E+01
+
+   Number of showers to be simulated = 6.000000E+03
+   Computation time available =  2.000000E+09 sec
+
+   Random-number generator seeds = 1993751964,  753089694
+
+   ---------------------------------------------------------------------------
+
+   ***  END  ***
+
+   ---------------------------------------------------------------------------

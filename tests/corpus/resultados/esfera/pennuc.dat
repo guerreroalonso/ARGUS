@@ -1,0 +1,51 @@
+ Radioisotope number  1
+ Parent nuclide:  CO60    (Z = 27, A =  60)
+ Number of daughters =  1
+
+ EC = electron capture,  IC = internal conversion.
+ BR = branching ratio,   PR = probability.
+ ----------------------------------------------------------------------------
+ Daughter nuclide number   1:  NI60    (Z = 28, A =  60)   Ni-60     
+   Q = 2.823070E+06 eV,  BR = 1.000000E+00
+
+ Excited levels:
+   3,  E = 2.505748E+06 eV,  half-life = 3.000000E-13 s
+   2,  E = 2.158610E+06 eV,  half-life = 5.900000E-13 s
+   1,  E = 1.332508E+06 eV,  half-life = 7.130000E-13 s
+
+ Disintegration branches:
+   1,  BETA- to level   3,  BR = 9.988000E-01,  E = 3.173200E+05 eV, Ipro = 0
+   2,  BETA- to level   2,  BR = 2.000000E-05,  E = 6.644600E+05 eV, Ipro = 2
+   3,  BETA- to level   1,  BR = 1.200000E-03,  E = 1.490560E+06 eV, Ipro = 2
+
+ Transitions from level   3
+   3 -->   0 ICL1 ,  E = 2.504836E+06 eV,  PR = 1.520000E-13
+   3 -->   0 ICK  ,  E = 2.497415E+06 eV,  PR = 1.560000E-12
+   3 -->   0 GAMMA,  E = 2.505692E+06 eV,  PR = 2.000000E-08
+   3 -->   1 ICL1 ,  E = 1.172328E+06 eV,  PR = 1.478000E-05
+   3 -->   1 ICK  ,  E = 1.164907E+06 eV,  PR = 1.510000E-04
+   3 -->   1 GAMMA,  E = 1.173228E+06 eV,  PR = 9.985000E-01
+   3 -->   2 ICL1 ,  E = 3.462300E+05 eV,  PR = 3.770000E-08
+   3 -->   2 ICK  ,  E = 3.388100E+05 eV,  PR = 3.740000E-07
+   3 -->   2 GAMMA,  E = 3.471400E+05 eV,  PR = 7.500000E-05
+
+ Transitions from level   2
+   2 -->   0 ICL1 ,  E = 2.157698E+06 eV,  PR = 5.200000E-11
+   2 -->   0 ICK  ,  E = 2.150277E+06 eV,  PR = 5.300000E-10
+   2 -->   0 GAMMA,  E = 2.158570E+06 eV,  PR = 1.200000E-05
+   2 -->   1 ICL1 ,  E = 8.251880E+05 eV,  PR = 2.210000E-09
+   2 -->   1 ICK  ,  E = 8.177670E+05 eV,  PR = 2.280000E-08
+   2 -->   1 GAMMA,  E = 8.261000E+05 eV,  PR = 7.600000E-05
+
+ Transitions from level   1
+   1 -->   0 ICL1 ,  E = 1.331596E+06 eV,  PR = 1.130000E-05
+   1 -->   0 ICK  ,  E = 1.324175E+06 eV,  PR = 1.150000E-04
+   1 -->   0 GAMMA,  E = 1.332492E+06 eV,  PR = 9.998260E-01
+ ----------------------------------------------------------------------------
+ Branching ratios to daughters (normalised):
+ 1.000000E+00
+
+ Maximum energies of released particles: 
+ Photons-electrons = 2.505692E+06 eV,  alphas = 0.000000E+00 eV
+
+ ---  END  ---

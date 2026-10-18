@@ -1,0 +1,86 @@
+
+
+   **************************************************************
+   **   Program PENHMAIN.  Input data and run-time messages.   **
+   **************************************************************
+
+   Date and time: 30th Sep 2026. 16:19:24
+
+   ARGUS corpus: tac (fotones)                                      
+
+   ---------------------------------------------------------------------------
+   >>>>>>  Geometry definition.
+   PENGEOM's geometry file: tac.geo             
+
+   ---------------------------------------------------------------------------
+   >>>>>>  Source description.
+
+   Primary particles: photons
+   Initial energy =  1.250000E+06 eV
+
+   Max. energy of electrons/photons =  1.250000E+06 eV
+   Max. energy of heavier particles =  0.000000E+00 eV
+
+   **** Conical beam:
+   Beam axis direction:     THETA =  0.000000E+00 deg
+                              PHI =  0.000000E+00 deg
+   Beam semiaperture:       ALPHA =  5.000000E+00 deg
+
+   Coordinates of centre:     SX0 =  0.000000E+00 cm
+                              SY0 =  0.000000E+00 cm
+                              SZ0 = -1.000000E+01 cm
+
+   ---------------------------------------------------------------------------
+   >>>>>>  Material data and simulation parameters.
+
+   ****  1st material
+   Material data file: water.mat           
+   Electron absorption energy =  1.000000E+04 eV
+     Photon absorption energy =  1.000000E+03 eV
+   Positron absorption energy =  1.000000E+04 eV
+   Electron-positron simulation parameters:
+    C1 = 5.000000E-02,      C2 = 5.000000E-02
+   Wcc = 1.000000E+04 eV,  Wcr = 1.000000E+03 eV
+
+   ****  2nd material
+   Material data file: hueso.mat           
+   Electron absorption energy =  1.000000E+04 eV
+     Photon absorption energy =  1.000000E+03 eV
+   Positron absorption energy =  1.000000E+04 eV
+   Electron-positron simulation parameters:
+    C1 = 5.000000E-02,      C2 = 5.000000E-02
+   Wcc = 1.000000E+04 eV,  Wcr = 1.000000E+03 eV
+
+   **** Maximum allowed step lengths of particles and local absorption
+        energies (non-void bodies, modified values only).
+
+   Body    DSMAX(IB)                EABSB(KP,IB)
+    IB       (cm)                       (eV)
+      1  1.000000E+20  9.999900E+02 9.999900E+02 9.999900E+02 (KP=1,2,3)
+                       0.000000E+00 0.000000E+00 0.000000E+00 (KP=4,5,6)
+
+   ---------------------------------------------------------------------------
+   **** Woodcock's delta-scattering method is active within the CT box.
+
+   ---------------------------------------------------------------------------
+   >>>>>>  Energy and angular distributions of emerging particles.
+   Energy window = ( 0.00000E+00, 1.25000E+06) eV
+   Number of energy bins =  100  (linear scale)
+       Polar angle: number of bins =  30  (linear scale)
+   Azimuthal angle: number of bins =   1
+
+   ---------------------------------------------------------------------------
+   >>>>>>  Job characteristics.
+   Write final counter values on the dump file: dump.dmp            
+   Dumping period: DUMPP = 8.640000E+04
+
+   Number of showers to be simulated = 2.000000E+04
+   Computation time available =  2.000000E+09 sec
+
+   Random-number generator seeds =          1,          1
+
+   ---------------------------------------------------------------------------
+
+   ***  END  ***
+
+   ---------------------------------------------------------------------------

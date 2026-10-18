@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+dist/
+
+# Compilaciones locales (sonda PENGEOM, ejecutables e instaladores: packaging/construir.py)
+build/
+*.o
+*.mod
+*.exe
+*.dmg
+*.7z
+argus_comprobacion.txt
+
+# Salidas de PENELOPE que puedan aparecer en pruebas
+/fort.*
+/geometry.rep
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# Lo que no va en el repositorio público (ADR-022): los ejemplos de PENELOPE, PenGeomJar y penhan del corpus de
+# pruebas (no se pueden redistribuir) y los casos del usuario. Siguen en la carpeta local; sin ellos, las pruebas
+# que los usan se omiten (tests/conftest.py).
+/tests/corpus/pengeomjar/
+/tests/corpus/ornl/
+/tests/corpus/penhan/
+/tests/corpus/usuario/

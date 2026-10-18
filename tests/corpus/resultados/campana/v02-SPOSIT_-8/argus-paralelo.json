@@ -1,0 +1,22 @@
+{
+  "argus": 1,
+  "kind": "paralelo",
+  "input": "caja.in",
+  "label": "SPOSIT z = -8 cm",
+  "runs": [
+    {
+      "folder": "run-01",
+      "seed": [
+        -3,
+        0
+      ]
+    },
+    {
+      "folder": "run-02",
+      "seed": [
+        -4,
+        0
+      ]
+    }
+  ]
+}

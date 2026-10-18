@@ -1,0 +1,17 @@
+Salidas reales de penhmain (versión 2025) para las pruebas del visor de resultados de ARGUS.
+
+Generadas en la nube con el penhmain de penhan compilado con gfortran (tools/gen_corpus_resultados.py de las
+notas de desarrollo, no incluido): casos pequeños con pocas lluvias. Faltan los .mat, los ENDF, los .nuc y los
+volcados (son grandes y no hacen falta para leer los resultados).
+
+* caja: fotones de dos líneas (SLINES) en una losa de agua; dosis en una caja (GRIDX/Y/Z), EPROF con sección
+  eficaz nula (mapa de fluencia de fotones), detectores de impacto (uno con espacio de fases, otro con fluencia
+  y edades), dos angulares, uno de energía depositada, NBANGL con 4 intervalos de azimut (angle.dat) y LTRACK.
+  psf-impdet.dat está recortado a sus 400 primeras partículas.
+* cilindro: protones con espectro (SPECTR) en un cilindro de agua; mapa cilíndrico (GRIDZ+GRIDR), fluencia de
+  protones (EPROF) y LTRACK.
+* esfera: fuente de Co-60 (PENNUC) en una esfera de agua; dosis radial (solo GRIDR) y fluencia de fotones.
+* tac: un TAC pequeño (8x6x12 vóxeles de agua con una inserción de hueso) girado 90 grados y desplazado.
+* paralelo: tres ejecuciones del mismo caso con RSEED -1, -2 y -3 (run-01..03) y su suma con penhmain-sum (suma).
+* campana: campaña preparada por ARGUS (penhan/batch.py) con el caso caja: la fuente en z = -5, -8 y -11 cm (SPOSIT), dos ejecuciones en paralelo por variante (RSEED -1..-6), lanzadas con su lanzar.sh. Solo se guardan
+  el resumen, penhmain.dat, la dosis en profundidad, z-dose y el espectro de energía depositada de cada ejecución, y los índices argus-campana.json y argus-paralelo.json.

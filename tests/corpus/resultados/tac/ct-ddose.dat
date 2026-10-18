@@ -1,0 +1,21 @@
+ #  Results from CTDOSE. Depth-dose distribution.
+ #  (integrated over X and Y within the volume of the dose box).
+ #  1st column: depth (cm).
+ #  2nd column: depth-dose (eV*cm**2/g).
+ #  3rd column: statistical uncertainty (underestimated).
+ #
+ #  NOTE: The calculated dose distribution is correct only when the 
+ #        volume bins in each z-layer have uniform mass density.
+ #
+  5.000000E-01  3.323829E+04  3.08E+03
+  1.500000E+00  3.874993E+04  3.27E+03
+  2.500000E+00  3.556815E+04  3.08E+03
+  3.500000E+00  3.511955E+04  3.04E+03
+  4.500000E+00  4.749055E+04  3.33E+03
+  5.500000E+00  4.358582E+04  3.23E+03
+  6.500000E+00  3.923863E+04  3.05E+03
+  7.500000E+00  3.474416E+04  2.87E+03
+  8.500000E+00  2.567179E+04  2.63E+03
+  9.500000E+00  2.316085E+04  2.49E+03
+  1.050000E+01  2.076744E+04  2.37E+03
+  1.150000E+01  1.958972E+04  2.29E+03

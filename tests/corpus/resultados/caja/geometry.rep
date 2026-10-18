@@ -1,0 +1,99 @@
+Losa de agua, un detector plano fino y un cilindro denso (corpus ARGUS) 
+                                                                        
+0000000000000000000000000000000000000000000000000000000000000000
+SURFACE (   1)   Plane Z=0                                           
+INDICES=( 0, 0, 0, 1, 0)
+0000000000000000000000000000000000000000000000000000000000000000
+SURFACE (   2)   Plane Z=5                                           
+INDICES=( 0, 0, 0, 1, 0)
+Z-SHIFT=( 5.000000000000000E+00,   0)       
+0000000000000000000000000000000000000000000000000000000000000000
+SURFACE (   3)   Cylinder R=10                                       
+INDICES=( 1, 1, 0, 0,-1)
+X-SCALE=( 1.000000000000000E+01,   0)       
+Y-SCALE=( 1.000000000000000E+01,   0)       
+0000000000000000000000000000000000000000000000000000000000000000
+SURFACE (   4)   Plane Z=6                                           
+INDICES=( 0, 0, 0, 1, 0)
+Z-SHIFT=( 6.000000000000000E+00,   0)       
+0000000000000000000000000000000000000000000000000000000000000000
+SURFACE (   5)   Plane Z=6.2                                         
+INDICES=( 0, 0, 0, 1, 0)
+Z-SHIFT=( 6.200000000000000E+00,   0)       
+0000000000000000000000000000000000000000000000000000000000000000
+SURFACE (   6)   Plane Z=8                                           
+INDICES=( 0, 0, 0, 1, 0)
+Z-SHIFT=( 8.000000000000000E+00,   0)       
+0000000000000000000000000000000000000000000000000000000000000000
+SURFACE (   7)   Plane Z=10                                          
+INDICES=( 0, 0, 0, 1, 0)
+Z-SHIFT=( 1.000000000000000E+01,   0)       
+0000000000000000000000000000000000000000000000000000000000000000
+SURFACE (   8)   Cylinder R=2                                        
+INDICES=( 1, 1, 0, 0,-1)
+X-SCALE=( 2.000000000000000E+00,   0)       
+Y-SCALE=( 2.000000000000000E+00,   0)       
+0000000000000000000000000000000000000000000000000000000000000000
+BODY    (   1)   Losa de agua                                        
+MATERIAL(   1)
+SURFACE (   1), SIDE POINTER=( 1)
+SURFACE (   2), SIDE POINTER=(-1)
+SURFACE (   3), SIDE POINTER=(-1)
+0000000000000000000000000000000000000000000000000000000000000000
+BODY    (   2)   Detector plano                                      
+MATERIAL(   1)
+SURFACE (   4), SIDE POINTER=( 1)
+SURFACE (   5), SIDE POINTER=(-1)
+SURFACE (   3), SIDE POINTER=(-1)
+0000000000000000000000000000000000000000000000000000000000000000
+BODY    (   3)   Detector denso                                      
+MATERIAL(   2)
+SURFACE (   6), SIDE POINTER=( 1)
+SURFACE (   7), SIDE POINTER=(-1)
+SURFACE (   8), SIDE POINTER=(-1)
+0000000000000000000000000000000000000000000000000000000000000000
+END      0000000000000000000000000000000000000000000000000000000
+
+
+
+*****************************************
+****     PENGEOM (version 2014)      ****
+****  Constructive Quadric Geometry  ****
+*****************************************
+
+
+
+************  Genealogical tree. 
+
+
+*** BODY   =    1,  KMOTH =    4,  MAT =  1
+KSURF =    1    2    3    9
+KFLAG =    2    1    1    1
+
+*** BODY   =    2,  KMOTH =    4,  MAT =  1
+KSURF =    4    5    3    9
+KFLAG =    2    1    1    1
+
+*** BODY   =    3,  KMOTH =    4,  MAT =  2
+KSURF =    6    7    8    9
+KFLAG =    2    1    1    1
+
+*** MODULE =    4,  KMOTH =    0,  MAT =  0
+KDGHT =    1    2    3    4
+KSURF =    9    1    2    3    4    5    6    7    8
+KFLAG =    1    4    4    4    4    4    4    4    4
+
+
+************  Adequacy of the geometry definition.
+
+The largest number of bodies in a module or
+     bodies limiting a single body is ............    4
+
+The largest number of limiting surfaces for
+     a single body or module is ..................    9
+
+
+The simulation of this geometry will be relatively fast,
+     no further optimisation seems to be required.
+
+************  The end.

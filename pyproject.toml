@@ -1,0 +1,55 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "argus"
+version = "0.17.0"
+description = "ARGUS: constructor y visor de geometrías PENGEOM y ficheros de entrada de penhan (PENELOPE)"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Rafael Guerrero Alonso" }]
+license = { text = "Uso interno de investigación" }
+dependencies = [
+    "numpy>=2.0",  # np.trapezoid
+    "PySide6>=6.6",
+    "numba>=0.59",  # LOCATE compilado (opcional en tiempo de ejecución: sin él se usa NumPy)
+    "pydicom>=3.0",  # importar TACs (DICOM)
+    "matplotlib>=3.8",  # gráficas de los resultados (curvas, mapas, exportar a PDF/SVG/PNG)
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-qt>=4.4",
+    "ruff>=0.5",
+]
+
+[project.scripts]
+argus = "argus.app:main"
+
+[project.gui-scripts]
+argus-gui = "argus.app:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/argus"]
+
+[tool.hatch.build.targets.sdist]
+exclude = ["build", "tests/corpus"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = [
+    "oracle: compara con la sonda PENGEOM compilada (se omite si no está)",
+    "gui: pruebas de la interfaz (necesitan PySide6)",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+src = ["src", "tests", "tools"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E741", "B905", "UP042"]

@@ -1,0 +1,152 @@
+{
+ "description": "Geometrías del corpus de pruebas y valores PARINP de su .in",
+ "geometries": [
+  {
+   "path": "pengeomjar/arrow"
+  },
+  {
+   "path": "pengeomjar/axes"
+  },
+  {
+   "path": "pengeomjar/box"
+  },
+  {
+   "path": "pengeomjar/chair"
+  },
+  {
+   "path": "pengeomjar/chair2"
+  },
+  {
+   "path": "pengeomjar/chair32"
+  },
+  {
+   "path": "pengeomjar/ctbox"
+  },
+  {
+   "path": "pengeomjar/cylinder"
+  },
+  {
+   "path": "pengeomjar/example1"
+  },
+  {
+   "path": "pengeomjar/example2"
+  },
+  {
+   "path": "pengeomjar/foil"
+  },
+  {
+   "path": "pengeomjar/glass"
+  },
+  {
+   "path": "pengeomjar/mlc"
+  },
+  {
+   "path": "pengeomjar/onion"
+  },
+  {
+   "path": "pengeomjar/plane"
+  },
+  {
+   "path": "pengeomjar/qtorus"
+  },
+  {
+   "path": "pengeomjar/quadric"
+  },
+  {
+   "path": "pengeomjar/quadricinbox"
+  },
+  {
+   "path": "pengeomjar/saturne"
+  },
+  {
+   "path": "pengeomjar/sphere"
+  },
+  {
+   "path": "pengeomjar/spheres"
+  },
+  {
+   "path": "pengeomjar/tball"
+  },
+  {
+   "path": "pengeomjar/tcone"
+  },
+  {
+   "path": "pengeomjar/tshell"
+  },
+  {
+   "path": "pengeomjar/well"
+  },
+  {
+   "path": "ornl/10y.geo"
+  },
+  {
+   "path": "ornl/15y.geo"
+  },
+  {
+   "path": "ornl/1y.geo"
+  },
+  {
+   "path": "ornl/5y.geo"
+  },
+  {
+   "path": "ornl/adult.geo"
+  },
+  {
+   "path": "ornl/newborn.geo"
+  },
+  {
+   "path": "penhan/disc/disc.geo",
+   "parinp": [
+    40.0,
+    40.0
+   ]
+  },
+  {
+   "path": "penhan/emfield_box/box.geo"
+  },
+  {
+   "path": "penhan/emfield_ct/ctbox.geo"
+  },
+  {
+   "path": "penhan/epma/disc.geo",
+   "parinp": [
+    0.1,
+    1.0
+   ]
+  },
+  {
+   "path": "penhan/nuclide/disc-origin.geo"
+  },
+  {
+   "path": "penhan/pixe/disc.geo",
+   "parinp": [
+    0.03,
+    0.03
+   ]
+  },
+  {
+   "path": "penhan/stack/3discs.geo",
+   "parinp": [
+    0.002,
+    0.004,
+    0.008,
+    0.008
+   ]
+  },
+  {
+   "path": "usuario/100Mev15-174/cubo-esfera.geo"
+  },
+  {
+   "path": "usuario/100Mev15-174/prueba.geo"
+  },
+  {
+   "path": "usuario/ComprobacionRangoProtones/cubo-esfera.geo"
+  },
+  {
+   "path": "usuario/PruebaProtones/cubo-esfera.geo"
+  },
+  {
+   "path": "usuario/PruebasNuevaGeo/prueba.geo"
+  }
+ ]
+}

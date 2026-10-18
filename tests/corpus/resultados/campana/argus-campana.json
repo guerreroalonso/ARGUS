@@ -1,0 +1,58 @@
+{
+  "argus": 1,
+  "kind": "campana",
+  "input": "caja.in",
+  "created": "2026-09-30 17:48:24",
+  "dumpp": 30,
+  "showers_per_run": 2000,
+  "parameters": [
+    {
+      "name": "SPOSIT z",
+      "kind": "keyword",
+      "keyword": "SPOSIT",
+      "index": 2,
+      "number": 0,
+      "unit": "cm",
+      "values": [
+        -5.0,
+        -8.0,
+        -11.0
+      ]
+    }
+  ],
+  "runs": [
+    {
+      "folder": "v01-SPOSIT_-5",
+      "label": "SPOSIT z = -5 cm",
+      "values": {
+        "SPOSIT z": -5.0
+      },
+      "runs": [
+        "v01-SPOSIT_-5/run-01",
+        "v01-SPOSIT_-5/run-02"
+      ]
+    },
+    {
+      "folder": "v02-SPOSIT_-8",
+      "label": "SPOSIT z = -8 cm",
+      "values": {
+        "SPOSIT z": -8.0
+      },
+      "runs": [
+        "v02-SPOSIT_-8/run-01",
+        "v02-SPOSIT_-8/run-02"
+      ]
+    },
+    {
+      "folder": "v03-SPOSIT_-11",
+      "label": "SPOSIT z = -11 cm",
+      "values": {
+        "SPOSIT z": -11.0
+      },
+      "runs": [
+        "v03-SPOSIT_-11/run-01",
+        "v03-SPOSIT_-11/run-02"
+      ]
+    }
+  ]
+}

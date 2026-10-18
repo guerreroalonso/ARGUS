@@ -1,0 +1,10 @@
+ #  Results from PENHMAIN.
+ #  Dose distribution along the central Y axis.
+ #  1st column: y (cm).
+ #  2nd column: dose (eV/g).
+ #  3rd column: statistical uncertainty (3 sigma).
+ -4.000000E+00  9.256086E+00  1.07E+01
+ -2.000000E+00  4.412608E+01  3.09E+01
+  5.000000E-09  1.592640E+03  2.49E+02
+  2.000000E+00  8.766160E+01  4.78E+01
+  4.000000E+00  1.554660E+01  1.52E+01

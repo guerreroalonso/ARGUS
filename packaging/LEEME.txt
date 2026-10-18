@@ -1,0 +1,59 @@
+ARGUS: cómo instalarlo
+======================
+
+ARGUS construye y muestra geometrías de PENGEOM y ficheros de entrada de penhan (PENELOPE), y lee sus
+resultados. No incluye los programas de penhan (penhmain, penhmat...): cuando hacen falta, ARGUS pregunta
+dónde están.
+
+Elija el paquete de su ordenador:
+
+  * Windows 10 u 11 (64 bits) ............... ARGUS-<versión>-Windows-instalador.exe
+  * macOS 13 o posterior, chip Apple (M1...) . ARGUS-<versión>-macOS-AppleSilicon.dmg
+  * macOS 13 o posterior, procesador Intel ... ARGUS-<versión>-macOS-Intel.dmg
+      (menú Apple > Acerca de este Mac: pone «Chip Apple...» o «Procesador ... Intel ...»)
+  * Linux de 64 bits (Ubuntu 22.04, Debian 12, Fedora 36 o posteriores)
+      ........................................ ARGUS-<versión>-Linux-x86_64.tar.gz (o .7z)
+
+Si el paquete tiene contraseña, se la da quien le pasó el enlace.
+
+
+Windows
+-------
+1. Doble clic en el instalador. Si sale «Windows protegió su PC», pulse «Más información» y después
+   «Ejecutar de todas formas» (ARGUS no lleva la firma de un certificado comercial).
+2. Si lo pide, escriba la contraseña.
+3. Por omisión se instala solo para usted, sin permisos de administrador. ARGUS queda en el menú Inicio, y
+   en «Abrir con» de los ficheros .geo y .in.
+Para quitarlo: Configuración > Aplicaciones > ARGUS > Desinstalar.
+Los programas de penhan se ejecutan en WSL, como siempre.
+
+
+macOS
+-----
+1. Doble clic en el .dmg (si lo pide, escriba la contraseña).
+2. Arrastre ARGUS a la carpeta Aplicaciones.
+3. La primera vez macOS no lo abre, porque ARGUS no está firmado por Apple: pulse «OK» en el aviso, vaya a
+   Ajustes del Sistema > Privacidad y seguridad, baje hasta el final y pulse «Abrir igualmente» junto a
+   ARGUS (y confírmelo). Solo hace falta la primera vez.
+
+
+Linux
+-----
+1. Descomprímalo:          tar xzf ARGUS-<versión>-Linux-x86_64.tar.gz
+   Si es el .7z (con contraseña):  7z x ARGUS-<versión>-Linux-x86_64.7z   y después el tar xzf de arriba
+   (7z viene en el paquete «7zip» o «p7zip-full» de su distribución).
+2. Para tenerlo en el menú de aplicaciones:   ./instalar.sh   (sin permisos de administrador)
+   O ábralo directamente:   ./ARGUS/ARGUS
+
+
+Si algo no funciona
+-------------------
+ARGUS se puede comprobar a sí mismo: con la opción --comprobar abre su ventana unos segundos, prueba lo que
+necesita (Numba, lectura de TACs, gráficas, vídeo, OpenGL) y escribe un informe, argus_comprobacion.txt, en
+la carpeta desde la que se ejecute. Envíe ese informe a quien le dio ARGUS.
+
+  * Windows (en «Símbolo del sistema»):
+        start /wait "" "%LOCALAPPDATA%\Programs\ARGUS\ARGUS.exe" --comprobar
+    (si lo instaló para todos los usuarios: "C:\Program Files\ARGUS\ARGUS.exe")
+  * macOS (en Terminal):   /Applications/ARGUS.app/Contents/MacOS/ARGUS --comprobar
+  * Linux:                 ./ARGUS/ARGUS --comprobar

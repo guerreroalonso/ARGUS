@@ -1,0 +1,10 @@
+  Reading the dump file ../run-01/dump.dmp                                                                                                      
+  Reading the dump file ../run-02/dump.dmp                                                                                                      
+  Reading the dump file ../run-03/dump.dmp                                                                                                      
+       Number of independent runs =  3
+  Number of simulated showers, NS = 1.8000000E+04
+       Total calculation time, TT = 1.0724000E+01 sec
+          CPU simulation time, CT = 1.9035738E+00 sec
+      CPU simulation speed, NS/CT = 9.4558984E+03 showers/sec
+
+  ***  END  ***

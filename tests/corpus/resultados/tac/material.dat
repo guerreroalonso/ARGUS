@@ -1,0 +1,56 @@
+
+ **********************************
+ **   PENELOPE  (version 2018)   **
+ **********************************
+
+ EMIN = 1.0000E+03 eV,  EMAX = 1.2500E+06 eV
+
+
+ **********************
+ **   1st material   **
+ **********************
+
+ Material data file: water.mat           
+
+ *** Simulation parameters:
+     Electron absorption energy = 1.0000E+04 eV
+       Photon absorption energy = 1.0000E+03 eV
+     Positron absorption energy = 1.0000E+04 eV
+      C1 = 5.0000E-02,       C2 = 5.0000E-02
+     WCC = 1.0000E+04 eV,   WCR = 1.0000E+03 eV
+
+ PENELOPE (v. 2018)  Material data file ...............
+ Material: WATER, LIQUID  --ICRU90  (278)                                
+ Mass density = 9.98210000E-01 g/cm**3
+ Number of elements in the molecule =  2
+    Element: H  (Z= 1), atoms/molecule = 2.00000000E+00
+    Element: O  (Z= 8), atoms/molecule = 1.00000000E+00
+ Mean excitation energy = 7.80000000E+01 eV
+ PENELOPE (v. 2018)  End of material data file ........
+
+
+ **********************
+ **   2nd material   **
+ **********************
+
+ Material data file: hueso.mat           
+
+ *** Simulation parameters:
+     Electron absorption energy = 1.0000E+04 eV
+       Photon absorption energy = 1.0000E+03 eV
+     Positron absorption energy = 1.0000E+04 eV
+      C1 = 5.0000E-02,       C2 = 5.0000E-02
+     WCC = 1.0000E+04 eV,   WCR = 1.0000E+03 eV
+
+ PENELOPE (v. 2018)  Material data file ...............
+ Material: hueso (TAC)                                                   
+ Mass density = 1.85000000E+00 g/cm**3
+ Number of elements in the molecule =  6
+    Element: H  (Z= 1), atoms/molecule = 1.00000000E+00
+    Element: C  (Z= 6), atoms/molecule = 3.64504673E-01
+    Element: N  (Z= 7), atoms/molecule = 3.03568082E-02
+    Element: O  (Z= 8), atoms/molecule = 4.19328356E-01
+    Element: P  (Z=15), atoms/molecule = 3.55908383E-02
+    Element: Ca (Z=20), atoms/molecule = 5.30475339E-02
+ Mean excitation energy = 9.43000000E+01 eV
+ PENELOPE (v. 2018)  End of material data file ........
