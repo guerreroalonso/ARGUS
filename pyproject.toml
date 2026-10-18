@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "argus"
-version = "0.17.0"
+version = "0.17.2"
 description = "ARGUS: constructor y visor de geometrías PENGEOM y ficheros de entrada de penhan (PENELOPE)"
 readme = "README.md"
 requires-python = ">=3.11"

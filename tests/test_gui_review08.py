@@ -144,6 +144,9 @@ def test_material_name_being_edited_is_saved(qtbot, window, case_dir):
         _focus(qtbot, ed)
     ed.selectAll()
     QTest.keyClicks(ed, "Agua liquida")
+    # Con la lista de lo que coincide desplegada (desde 0.17.1 siempre hay lista: la de ARGUS), Guardar perdía lo
+    # escrito: el campo no se confirma al perder el foco con la lista abierta.
+    assert QApplication.activePopupWidget() is not None
     w.act_save.trigger()
     assert "Agua liquida" in _on_disk(case_dir / "maniqui.in", "MFNAME")
     qtbot.wait(50)

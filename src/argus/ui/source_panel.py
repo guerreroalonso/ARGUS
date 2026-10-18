@@ -112,11 +112,13 @@ class NumberEdit(QLineEdit):
     """Campo numérico que acepta el formato de Fortran (1.E6, 1d3) y la coma decimal."""
 
     valueEdited = Signal(float)
+    cleared = Signal()  # con ``allow_empty``: se ha vaciado el campo (se quita la línea; décima revisión)
 
     def __init__(self, parent=None, *, minimum: float | None = None, maximum: float | None = None,
-                 width: int = 74, tooltip: str = ""):
+                 width: int = 74, tooltip: str = "", allow_empty: bool = False):
         super().__init__(parent)
         self._value: float | None = None
+        self._allow_empty = allow_empty
         self._problem: str | None = None  # por qué no sirve el valor (se marca en rojo mientras dure)
         self._min, self._max = minimum, maximum
         self.setAlignment(Qt.AlignmentFlag.AlignRight)
@@ -165,6 +167,12 @@ class NumberEdit(QLineEdit):
         if not self.isModified():
             return
         self.setModified(False)
+        if self._allow_empty and not self.text().strip():
+            self.setText("")
+            if self._value is not None:
+                self._value = None
+                self.cleared.emit()
+            return
         try:
             v = self.parse(self.text())
             if self._min is not None and v < self._min:

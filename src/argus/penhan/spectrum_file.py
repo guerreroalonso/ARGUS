@@ -163,6 +163,9 @@ def _from_penhmain(p: Path) -> SpectrumData | None:
     if not isinstance(c, Curves) or c.x_unit != "eV" or c.edges is None or not c.series \
             or len(c.edges) != len(c.x) + 1:
         raise ValueError(f"{p.name} es un resultado de penhmain, pero no un espectro de energía")
+    edges = np.asarray(c.edges, dtype=np.float64)
+    if not np.all(np.isfinite(edges)) or edges[0] < 0 or np.any(np.diff(edges) < 0):
+        raise ValueError(f"{p.name}: las energías no van en orden o son negativas (¿está dañado?)")
     kind = KINDS.get(c.kind)
     title = kind.title if kind is not None else c.title
     series = [(s.name, s.particle, np.asarray(s.y, dtype=np.float64)) for s in c.series
@@ -520,6 +523,8 @@ def convert(data: SpectrumData, opt: ImportOptions) -> Converted:
             e, v = _sorted_pairs(cols[0] * f, cols[1], notes)
             if len(e) < 2:
                 raise ValueError("Con los centros de los intervalos hacen falta al menos dos filas")
+            if e[0] < 0:  # (con todos los centros >= 0, solo el primer borde puede salir negativo)
+                raise ValueError(f"Hay energías negativas (la primera es {_fmt_e(float(e[0]))})")
             edges = edges_from_centers(e)
             lo, hi = edges[:-1], edges[1:]
             if lo[0] < 0:
@@ -648,7 +653,12 @@ def _bin_values(v: np.ndarray, width: np.ndarray, what: str, notes: list[str]) -
         notes.append(f"{plural(int(np.sum(v < 0)), 'valor negativo', 'valores negativos')}: penhmain "
                      f"{'lo' if int(np.sum(v < 0)) == 1 else 'los'} toma como 0.")
         v = np.clip(v, 0.0, None)
-    return v * width if what == "density" else v
+    if what != "density":
+        return v
+    top = float(v.max()) if len(v) else 0.0
+    if top > 0.0:
+        v = v / top  # (solo importan las proporciones: así v·ΔE no se desborda; décima revisión)
+    return v * width
 
 
 def _continuous_rows(lo: np.ndarray, hi: np.ndarray, p: np.ndarray, max_rows: int,
@@ -666,6 +676,7 @@ def _continuous_rows(lo: np.ndarray, hi: np.ndarray, p: np.ndarray, max_rows: in
             parts.append(f"{len(p) - 1 - last} al final")
         notes.append("Se han quitado los intervalos vacíos de los extremos (" + " y ".join(parts) + ").")
     lo, hi, p = lo[first:last + 1], hi[first:last + 1], p[first:last + 1]
+    p = p / float(p.max())  # (solo importan las proporciones: así la suma no se desborda)
     n0 = len(p)
     lo, hi, p = regroup_bins(lo, hi, p, max(max_rows - 1, 1))
     if len(p) < n0:
@@ -696,6 +707,7 @@ def _line_rows(e: np.ndarray, v: np.ndarray, max_rows: int, notes: list[str]) ->
         notes.append(f"{plural(int((~keep).sum()), 'línea')} con probabilidad 0: se "
                      f"{'quita' if int((~keep).sum()) == 1 else 'quitan'}.")
         e, v = e[keep], v[keep]
+    v = v / float(v.max())  # (solo importan las proporciones: así las sumas no se desbordan)
     order = np.argsort(e, kind="stable")
     e, v = e[order], v[order]
     # Energías repetidas: una sola línea con la suma.
@@ -783,7 +795,7 @@ def merge_lines(e: np.ndarray, v: np.ndarray, max_rows: int) -> tuple[np.ndarray
         if not (alive[i] and alive[j] and ver[i] == vi and ver[j] == vj and right[i] == j):
             continue
         w = gv[i] + gv[j]
-        ge[i] = (gv[i] * ge[i] + gv[j] * ge[j]) / w if w > 0 else 0.5 * (ge[i] + ge[j])
+        ge[i] = ge[i] + (ge[j] - ge[i]) * (gv[j] / w if w > 0 else 0.5)  # (sin desbordarse)
         gv[i] = w
         alive[j] = False
         ver[i] += 1

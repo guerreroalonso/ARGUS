@@ -407,10 +407,29 @@ class MaterialList(list):
     nombre de un fichero: «H2O.mat», «Al2O3.mat»)."""
 
     def __init__(self, items=(), formulas: dict[int, dict[int, float]] | None = None,
-                 densities: dict[int, float] | None = None):
+                 densities: dict[int, float] | None = None, builtin: bool = False):
         super().__init__(items)
         self.formulas: dict[int, dict[int, float]] = formulas or {}
         self.densities: dict[int, float] = densities or {}
+        self.builtin = builtin  # la que trae ARGUS (:func:`builtin_material_list`), no la de la base de datos
+
+
+def builtin_material_list() -> MaterialList:
+    """Los 280 materiales de la lista de PENELOPE con sus números y sus nombres en inglés, los que trae ARGUS
+    (:data:`argus.penhan.material_names.NAMES`, los de ``material-list.txt`` de penhan 2025), para cuando no se
+    encuentra la del usuario: sin la carpeta de penhan en «Programas de penhan» y sin penhan cerca del caso (en el
+    ejecutable, la carpeta del programa no está junto a penhan). El desplegable del material los ofrece igual, sin
+    fórmulas ni densidades (son de ``pdfiles/pdcompos.pen``, de la base de datos); generar el .mat sigue necesitando la
+    carpeta de penhan (penhmat)."""
+    from .material_names import NAMES
+
+    return MaterialList(sorted((n, english) for n, (english, _es) in NAMES.items()), builtin=True)
+
+
+def material_list_or_builtin(path: str | Path | None) -> MaterialList:
+    """La lista de ``path`` (``material-list.txt``) o, si no hay o no se lee, la que trae ARGUS."""
+    found = load_material_list(path) if path is not None else None
+    return found if found else builtin_material_list()
 
 
 _COMPOS_HEAD = re.compile(r"^\s*(\d+)\s+\S.*\(\s*(\d+)\s*\)\s+(\d+)\*?\s*$")

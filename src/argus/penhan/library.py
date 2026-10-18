@@ -184,6 +184,10 @@ def write_file(path: str | os.PathLike, items: list[LibraryMaterial], unread: li
     data = {**(extra or {}), "kind": KIND, "version": max(VERSION, version),
             "materials": [to_json(m) for m in items] + list(unread or [])}
     text = json.dumps(data, ensure_ascii=False, indent=1) + "\n"
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:  # un «\\udfff» suelto (JSON válido, escrito por otro programa): se escribe escapado
+        text = json.dumps(data, ensure_ascii=True, indent=1) + "\n"
     tmp, out = new_temp(path)
     try:
         with out:

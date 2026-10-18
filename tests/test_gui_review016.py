@@ -1,5 +1,5 @@
-"""Revisión de 0.16 (0.16.2), en la interfaz: la carpeta de los ENDF en «Programas de penhan», las tandas de «Lluvias»
-con el penhmain que guarda otras, los ENDF que faltan al ejecutar, el motivo con un espacio de fases y los plurales."""
+"""Revisión de 0.16 (0.16.2), en la interfaz: la carpeta de los ENDF en «Programas de penhan», la cascada con el
+penhmain que guarda otras lluvias, los ENDF que faltan al ejecutar, el motivo con un espacio de fases y los plurales."""
 
 import os
 import shutil
@@ -123,11 +123,12 @@ def test_the_psf_reason_in_the_generate_dialog(qtbot, tmp_path, settings):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="el penhmain de mentira es un guion de sh")
-def test_showers_are_counted_with_what_this_penhmain_keeps(qtbot, tmp_path, settings):
+def test_the_cascade_still_counts_with_what_this_penhmain_keeps(qtbot, tmp_path, settings, monkeypatch):
     """Revisión de 0.16: con un penhmain que guarda 99 lluvias por ejecución (lo aprendido con la prueba de LTRACK
-    99), la cascada hace 11 tandas para 1000 lluvias, pero «Ejecutar» decía «20 tandas de 50»."""
+    99), la cascada hace 11 tandas para 1000 lluvias. Desde 0.17.1 «Ejecutar» ya no cuenta tandas (solo cuántas
+    lluvias), pero la cascada sigue usando lo que guarda ese penhmain."""
     from argus.penhan import cascade as cs
-    from argus.ui.cascade_ui import remember_cap
+    from argus.ui import cascade_ui as cu
     from argus.ui.settings import PENHMAIN_KEY
     from test_run import _case, _fake_penhmain
     from test_run_ui import _dialog as run_dialog
@@ -140,12 +141,13 @@ def test_showers_are_counted_with_what_this_penhmain_keeps(qtbot, tmp_path, sett
     _headers(in_path)
     dlg, _ctrl = run_dialog(qtbot, in_path, settings)
     dlg.showers.setValue(1000)
-    assert dlg.showers_text.text().endswith("20 tandas de 50")  # sin saberlo, las de penhmain.f
-    remember_cap(exe, 99, settings)
+    before = dlg.showers_text.text()
+    cu.remember_cap(exe, 99, settings)
     dlg.refresh()
-    assert len(cs.runs_for(1000, 99)) == 11
-    assert dlg.showers_text.text().endswith("11 tandas de 99")
-    assert "tandas de 99" in dlg.showers.toolTip() and "como mucho 100" in dlg.showers_note.text()
+    assert dlg.showers_text.text() == before == "para verlas en 3D (como mucho 1000)"
+    monkeypatch.setattr(cs, "start_job", lambda job: job)  # (sin ejecutar nada)
+    job = cu.start_cascade(in_path, showers=1000, settings=settings, exe=exe)
+    assert job.showers == 1000 and job.cap == 99 and len(cs.runs_for(1000, job.cap)) == 11
 
 
 def test_run_shows_how_to_find_the_missing_endf(qtbot, tmp_path, settings):
@@ -189,10 +191,12 @@ def test_one_of_each_in_the_simulation_folder_dialog(qtbot, tmp_path, settings):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="el penhmain de mentira es un guion de sh")
-def test_the_showers_with_the_penhmain_that_will_replace_the_folder_one(qtbot, tmp_path, settings):
-    """Segunda pasada: con otro penhmain en la carpeta y «Sustituirlo por el elegido», las tandas de «Lluvias» se
-    contaban con el de la carpeta (el que se iba a sustituir) y no cambiaban al elegir."""
-    from argus.ui.cascade_ui import remember_cap
+def test_the_cascade_runs_with_the_penhmain_that_replaces_the_folder_one(qtbot, tmp_path, settings, monkeypatch):
+    """Segunda pasada de 0.16: con otro penhmain en la carpeta y «Sustituirlo por el elegido», las tandas de «Lluvias»
+    se contaban con el de la carpeta (el que se iba a sustituir). Desde 0.17.1 lo de al lado de «Lluvias» no depende
+    del penhmain, y la cascada se simula con el que queda en la carpeta: el elegido, con lo que guarda él."""
+    from argus.penhan import run as rn
+    from argus.ui.cascade_ui import known_cap, remember_cap
     from argus.ui.settings import PENHMAIN_KEY
     from test_run import _case, _fake_penhmain
     from test_run_ui import _dialog as run_dialog
@@ -208,13 +212,15 @@ def test_the_showers_with_the_penhmain_that_will_replace_the_folder_one(qtbot, t
     remember_cap(folder_exe, 50, settings)
     settings.setValue(PENHMAIN_KEY, str(chosen))
     settings.setValue("cascada/al_ejecutar", "false")
+    monkeypatch.setattr(rn, "start", lambda plan, **_kw: rn.RunHandle(
+        None, plan.folder, plan.in_path.name, rn.Terminal(["true"], plan.folder, "un terminal")))  # sin terminal
     dlg, _ctrl = run_dialog(qtbot, in_path, settings)
     dlg.showers.setValue(1000)
     assert dlg.plan.exe.status == "conflict" and dlg.use_folder.isChecked()
-    assert dlg.showers_text.text().endswith("20 tandas de 50")
+    text = dlg.showers_text.text()
     dlg.replace.setChecked(True)
-    assert dlg.showers_text.text().endswith("11 tandas de 99")
-    dlg.refresh()
-    assert dlg.showers_text.text().endswith("11 tandas de 99")
-    dlg.use_folder.setChecked(True)
-    assert dlg.showers_text.text().endswith("20 tandas de 50")
+    assert dlg.showers_text.text() == text == "para verlas en 3D (como mucho 1000)"
+    dlg.go.click()
+    assert dlg.result() == dlg.DialogCode.Accepted and dlg.cascade_n == 1000
+    assert dlg.cascade_exe == folder_exe and folder_exe.read_text() == chosen.read_text()
+    assert known_cap(dlg.cascade_exe, settings) == 99  # el elegido, ya en la carpeta

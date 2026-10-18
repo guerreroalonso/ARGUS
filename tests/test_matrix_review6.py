@@ -346,8 +346,9 @@ def test_too_many_age_bins_are_an_error():
 
 def test_the_editors_mark_what_penhmain_would_not_use(qtbot):
     """El editor de un detector angular enseña «E máx.» con EU < 50 eV (no «0 eV») y marca en rojo una ventana
-    vacía; los intervalos de más (IDAGEL 2000, GRIDX 150) se marcan en vez de enseñar el máximo como si fuera bueno;
-    LTRACK 100 enseña 50 sin marcarlo (penhmain guarda 50)."""
+    vacía; los intervalos de más (IDAGEL 2000, GRIDX 150) se marcan en vez de enseñar el máximo como si fuera bueno.
+    LTRACK 100 enseñaba 50 sin marcarlo; desde 0.17.1 «Trabajo» no tiene LTRACK (las lluvias para verlas en 3D son
+    «Lluvias», al ejecutar) y el que trae el .in se queda como está."""
     pytest.importorskip("PySide6")
     from argus.ui.sim_outputs import AngularSection, DoseSection, ImpactSection, JobSection
 
@@ -378,7 +379,7 @@ def test_the_editors_mark_what_penhmain_would_not_use(qtbot):
     job = JobSection()
     qtbot.addWidget(job)
     job.set_context(doc, None, CAJA)
-    assert job.ltrack.spin.value() == 50 and job.ltrack.spin.styleSheet() == ""
+    assert not hasattr(job, "ltrack") and sc.value(doc, "LTRACK") == [100]
 
 
 # ---------------------------------------------------------------------------------------------------------------------

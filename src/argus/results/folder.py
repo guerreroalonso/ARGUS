@@ -460,6 +460,8 @@ class ResultsFolder:
                     manifest = json.loads(p.read_text(encoding="utf-8"))
                 except (OSError, ValueError):
                     manifest = None
+                if not isinstance(manifest, dict):
+                    manifest = None
                 continue
             key = (str(p), st.st_size, int(st.st_mtime_ns))
             if key in _ID_CACHE:

@@ -1,7 +1,7 @@
 """Ventana: los materiales (0.16.0, ADR-020). El fallo al pasar de «lista de PENELOPE» a «composición propia» y
 volver, el campo del material que despliega la lista y la acota al escribir, los materiales personalizados (guardar,
 elegir, editar, duplicar, borrar, exportar e importar), «Asignar materiales…» para los que ARGUS no identifica, la
-carpeta de los ENDF y los textos de «Trayectorias» y «Lluvias» al ejecutar."""
+carpeta de los ENDF y «Lluvias» al ejecutar (desde 0.17.1, un solo número)."""
 
 import os
 import shutil
@@ -359,10 +359,16 @@ def test_the_endf_folder_in_penhan_programs(qtbot, tmp_path, errors):
     assert not errors
 
 
-# -- «Ejecutar»: trayectorias y lluvias --------------------------------------------------------------------------------
+# -- «Ejecutar»: las lluvias -----------------------------------------------------------------------------------------
 
 @pytest.mark.skipif(os.name == "nt", reason="el penhmain de mentira es un guion de sh")
-def test_trajectories_and_showers_say_what_they_are(qtbot, tmp_path):
+def test_showers_are_just_how_many(qtbot, tmp_path):
+    """0.17.1 (Rafael, 18-10-2026: «que solo tenga que poner el número de lluvias máxima, que como máximo puede ser
+    1000»): «Lluvias» es un solo número, de 1 a 1000 (o ninguna), sin tandas ni carpetas al lado; «Trayectorias»
+    (LTRACK, las de los .trk de la propia simulación) ya no se enseña aparte, y el LTRACK que trae el .in se respeta."""
+    from argus.penhan import cascade as cs
+    from argus.penhan import sections as sc
+    from argus.ui.run_dialog import SHOWERS_TIP
     from argus.ui.settings import PENHMAIN_KEY, app_settings
     from test_run import _case, _fake_penhmain
     from test_run_ui import _dialog as run_dialog
@@ -373,17 +379,24 @@ def test_trajectories_and_showers_say_what_they_are(qtbot, tmp_path):
     s.setValue("cascada/al_ejecutar", "false")
     in_path, _doc = _case(tmp_path)
     _headers(in_path)
-    dlg, _ctrl = run_dialog(qtbot, in_path, s)
-    dlg.showers.setValue(1000)
-    assert dlg.showers_text.text().endswith("20 tandas de 50")
-    dlg.showers.setValue(30)
-    assert dlg.showers_text.text().endswith("una tanda")
+    dlg, ctrl = run_dialog(qtbot, in_path, s)
+    assert cs.MAX_SHOWERS == 1000
+    assert (dlg.showers.minimum(), dlg.showers.maximum()) == (0, 1000) and dlg.showers.specialValueText() == "ninguna"
+    for n in (1, 30, 51, 1000):
+        dlg.showers.setValue(n)
+        assert dlg.showers_text.text() == "para verlas en 3D (como mucho 1000)"
     dlg.showers.setValue(0)
-    assert "sin cascada" in dlg.showers_text.text()
-    labels = [dlg.job.form.itemAt(i, dlg.job.form.ItemRole.LabelRole).widget().text() for i in range(3)]
-    assert labels == ["Partículas:", "Tiempo máx.:", "Lluvias:"]
-    assert "tandas de 50" in dlg.showers.toolTip() and "límite fijo de penhmain" in dlg.job.ltrack.toolTip()
-    assert "LTRACK + 1" in dlg.job.ltrack.toolTip() and "como mucho 51" in dlg.showers_note.text()
+    assert dlg.showers_text.text() == "no se simula ninguna para verlas en 3D"
+    form = dlg.job.form
+    labels = [form.itemAt(i, form.ItemRole.LabelRole).widget().text() for i in range(form.rowCount())
+              if form.itemAt(i, form.ItemRole.LabelRole) is not None]
+    assert labels[:3] == ["Partículas:", "Tiempo máx.:", "Lluvias:"] and "Trayectorias:" not in labels
+    assert dlg.showers.toolTip() == SHOWERS_TIP and "de 1 a 1000" in SHOWERS_TIP
+    for text in (SHOWERS_TIP, dlg.showers_text.text()):
+        assert not any(w in text for w in ("tanda", "carpeta", "LTRACK", "Trayectorias")), text
+    assert not hasattr(dlg, "showers_note") and not hasattr(dlg.job, "ltrack")
+    assert "Trayectorias" not in dlg.results.text() and "Dosis en 3D" in dlg.results.text()
+    assert sc.value(ctrl.doc, "LTRACK") == [5] and not ctrl.dirty  # (el de caja.in, sin tocar)
     s.remove(PENHMAIN_KEY)
     s.remove("cascada")
 

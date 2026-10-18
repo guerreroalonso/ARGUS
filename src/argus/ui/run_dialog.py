@@ -116,6 +116,11 @@ class _WslCheck(QObject):
             pass
 
 
+SHOWERS_TIP = ("Cuántas de las primeras lluvias del caso (cada partícula con todo lo que crea) quiere ver en 3D, "
+               f"animadas, en la ventana de resultados: de 1 a {cs.MAX_SHOWERS} («ninguna», sin ellas). ARGUS las "
+               "simula con su penhmain a la vez que la simulación; con protones, alfas o neutrones tardan más.")
+
+
 def results_summary(doc, geo) -> list[str]:
     """Lo que pide el .in, por objetivos («Dosis en 3D (caja de vóxeles): 51 × 51 × 101 vóxeles»…)."""
     from ..core.numfmt import plural
@@ -123,6 +128,8 @@ def results_summary(doc, geo) -> list[str]:
 
     out = []
     for g in gl.GOALS:
+        if g.key == "trayectorias":
+            continue  # (las lluvias para verlas en 3D son «Lluvias», en «Trabajo»: un solo número)
         try:
             st = gl.status(doc, g.key, geo)
         except (KeyError, ValueError):
@@ -272,15 +279,12 @@ class RunDialog(QDialog):
         self.showers.setSingleStep(100)
         self.showers.setSpecialValueText("ninguna")
         self.showers.setValue(default_showers(settings) if with_run(settings) else 0)
+        self.showers.setToolTip(SHOWERS_TIP)
         self.showers_text = QLabel()
         self.showers_text.setStyleSheet("color: #666;")
         self.showers.valueChanged.connect(lambda _v: self._showers_text())
         self.job.form.insertRow(2, "Lluvias:", form_row(self.showers, self.showers_text))
         bl.addWidget(self.job)
-        self.showers_note = note = QLabel()
-        note.setWordWrap(True)
-        note.setStyleSheet("color: #666;")
-        bl.addWidget(note)
         self._showers_text()
         body.addWidget(box)
         # Resultados anteriores y otra simulación en marcha
@@ -391,7 +395,6 @@ class RunDialog(QDialog):
             WARN_COLOR))
         self._fill_previous(plan)
         self._fill_errors()
-        self._showers_text()  # (las tandas dependen del penhmain que se usará)
         self._update_go()
 
     def _launch_while_checking(self, info: pg.ExeInfo) -> pg.Launch:
@@ -451,7 +454,6 @@ class RunDialog(QDialog):
     # -- el terminal ----------------------------------------------------------------------------------------------
     def _exe_choice_changed(self) -> None:
         self._fill_terminal()
-        self._showers_text()  # las tandas son las del penhmain que se usará
         self._update_go()
 
     def _fill_terminal(self) -> None:
@@ -690,64 +692,13 @@ class RunDialog(QDialog):
             dlg.deleteLater()
         self.refresh()
 
-    def _cascade_cap(self) -> int:
-        """Cuántas lluvias guarda por ejecución el penhmain que se usará (lo aprendido con su prueba; si no se sabe,
-        las 50 de penhmain.f)."""
-        from .cascade_ui import known_cap
-
-        plan = self.plan
-        exe = None
-        if plan is not None:
-            run_exe = self._exe_to_run() or plan.exe
-            if plan.exe.status == "conflict" and self.replace.isChecked():
-                exe = plan.exe.chosen  # el elegido sustituirá al de la carpeta
-            else:
-                exe = run_exe.target if run_exe.target is not None and run_exe.target.is_file() else run_exe.chosen
-        cap = None
-        if exe is not None:
-            try:
-                st = Path(exe).stat()
-                key = (str(exe), st.st_size, st.st_mtime_ns)
-            except OSError:
-                key = None
-            if key is not None:
-                memo = getattr(self, "_sha_memo", None)
-                if memo is None or memo[0] != key:  # (su sha1 lee el ejecutable entero: no a cada cambio)
-                    self._sha_memo = memo = (key, cs.file_sha1(exe))
-                cap = known_cap(exe, self.settings, sha=memo[1]) if memo[1] else None
-        return int(cap) if cap else cs.NPSHOW_DEFAULT
-
     def _showers_text(self) -> None:
-        """Lo que se hará con las lluvias pedidas: cuántas tandas de penhmain (con las que guarda el penhmain que se
-        usará, si ya se sabe: revisión de 0.16)."""
-        from ..core.numfmt import plural
-
-        cap = self._cascade_cap()
-        self._showers_help(cap)
+        """Lo de al lado de «Lluvias»: solo cuántas, sin tandas ni carpetas, que eran detalles de cómo las simula ARGUS
+        (Rafael, 18-10-2026: «que solo tenga que poner el número de lluvias máxima, que como máximo puede ser
+        1000»)."""
         n = int(self.showers.value())
-        if n <= 0:
-            self.showers_text.setText(f"(como mucho {cs.MAX_SHOWERS}): sin cascada")
-            return
-        k = len(cs.runs_for(n, cap))
-        tandas = f"{plural(k, 'tanda')} de {cap}" if k > 1 else "una tanda"
-        self.showers_text.setText(f"para verlas en 3D (como mucho {cs.MAX_SHOWERS}): {tandas}")
-
-    def _showers_help(self, cap: int) -> None:
-        """La ayuda de «Lluvias» y la nota de debajo, con las lluvias que guarda por ejecución este penhmain."""
-        default = "" if cap != cs.NPSHOW_DEFAULT else f" (NPSHOW = {cs.NPSHOW_DEFAULT} en penhmain.f)"
-        self.showers.setToolTip(
-            "La cascada: cuántas de las primeras lluvias (cada partícula con todo lo que crea) se siguen para verlas "
-            f"en 3D, animadas (como mucho {cs.MAX_SHOWERS}; 0, ninguna). penhmain guarda las trayectorias de {cap} "
-            f"lluvias en cada ejecución{default}, así que ARGUS lo ejecuta aparte varias veces, en tandas de {cap} "
-            f"con otras semillas: 1000 lluvias son {len(cs.runs_for(1000, cap))} tandas. La primera tanda es "
-            f"idéntica a las primeras {cap} lluvias de la simulación.")
-        self.showers_note.setText(
-            "«Lluvias» es la cascada: se simula aparte con el mismo penhmain (en la carpeta «cascada» junto al .in), a "
-            f"la vez que la simulación, en tandas de {cap} lluvias porque penhmain no guarda las trayectorias de más "
-            "por ejecución, y se ve en la ventana de resultados. «Trayectorias» (abajo) son las que guarda la propia "
-            f"simulación: sus primeras LTRACK + 1 lluvias (penhmain escribe también la siguiente a la última pedida; "
-            f"como mucho {cap + 1}). Con protones, alfas o neutrones cada tanda tarda más: penhmain prepara sus datos "
-            "cada vez (unos minutos).")
+        self.showers_text.setText(f"para verlas en 3D (como mucho {cs.MAX_SHOWERS})" if n > 0
+                                  else "no se simula ninguna para verlas en 3D")
 
     def _choose_outputs(self) -> None:
         """«Elegir resultados…»: el mismo diálogo que en la ventana, aquí modal (este lo es)."""
@@ -771,9 +722,11 @@ class RunDialog(QDialog):
         """Copia lo que falta, pone penhmain en la carpeta, guarda los resultados anteriores y abre el terminal."""
         if self._copier is not None:
             return
-        if self.ctrl.dirty and self.save is not None:
+        # penhmain lee lo guardado: el .in y también la geometría, que «Deshacer» de «Elegir resultados…» (el de la
+        # ventana) puede haber cambiado con este diálogo abierto (décima revisión). Sin cambios, save() no hace nada.
+        if self.save is not None:
             if not self.save():
-                self.status.setText("No se ha guardado el .in: no se ejecuta.")
+                self.status.setText("No se han guardado los cambios (el .in o la geometría): no se ejecuta.")
                 return
         self.refresh()
         if self.problems():

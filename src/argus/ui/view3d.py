@@ -648,7 +648,9 @@ class View3D(QWidget):
         self.backend_note = ""
         self._press = None
         self._press_cam: Camera | None = None
+        self._press_pivot = None  # el punto cogido al empezar a girar o desplazar (o None: el objetivo)
         self._moved = False
+        self._nav_tracks: tuple | None = None  # (clave, puntos de las trayectorias que se ven) para _nav_point
         self._hover_pos = None
         self._last_info = ""
         self._occl_cache: dict = {}
@@ -891,12 +893,14 @@ class View3D(QWidget):
     def set_tracks(self, tracks) -> None:
         """Trayectorias de LTRACK (lista de Tracks) sobre la geometría (lo que tapa la geometría, más tenue)."""
         self.tracks = tracks or None
+        self._nav_tracks = None
         self.overlay.update()
 
     def set_track_layer(self, data) -> None:
         """Trayectorias de una cascada (``TrackLayerData``) sobre la geometría (None las quita). En la GPU se
         dibujan como líneas que la geometría opaca tapa; sin GPU, con QPainter (como mucho MAX_CPU_SEGMENTS)."""
         self.track_layer = data
+        self._nav_tracks = None
         if data is not None and (not isinstance(self.canvas, GLCanvas) or getattr(self.canvas, "track_error", None)):
             data.release_gpu()  # sin GPU no se suben: lo preparado para ella sobra (32 bytes por punto)
         back = ortho_back(self.camera, *self._content_bounds())
@@ -1139,6 +1143,75 @@ class View3D(QWidget):
         return {"point": p, "body": kb, "surface": ks, "t": t, "origin": o, "direction": d,
                 "mat": self.session.geo.body(kb).material}
 
+    def _opaque_visibility(self) -> np.ndarray:
+        """Visibilidad por cuerpo contando solo lo opaco (lo translúcido, como oculto)."""
+        return visibility_array(self.session.geo, {**self.material_visibility,
+                                                   **{m: HIDDEN for m, v in self.material_visibility.items()
+                                                      if v == TRANSLUCENT}}, self.hidden_bodies)
+
+    NAV_TRACK_RADIUS = 10.0  # píxeles: una trayectoria dibujada tan cerca del cursor es lo que se mira
+
+    def _track_points(self) -> np.ndarray | None:
+        """Los puntos de las trayectorias que se dibujan, en cm: los de la cascada con los filtros del visor (y, en la
+        animación, los ya recorridos) y los de LTRACK que caben en la imagen (``MAX_TRACK_POINTS``). Se guardan
+        mientras no cambien (la rueda los pide a cada paso)."""
+        data, st = self.track_layer, self.track_style
+        key = (id(data), getattr(data, "uid", None), st.particles, st.shower_lo, st.shower_hi, id(self.tracks),
+               (st.time, st.stagger) if st.animate else None, self.MAX_TRACK_POINTS)
+        if self._nav_tracks is not None and self._nav_tracks[0] == key:
+            return self._nav_tracks[1]
+        parts = []
+        if data is not None and data.n_segments:
+            mask = st.visible_mask(data)
+            used = np.zeros(len(data.vertices), dtype=bool)
+            used[data.seg_a[mask]] = True
+            used[data.seg_b[mask]] = True
+            if st.animate:  # lo que aún no ha salido no se ve (como en el shader)
+                idx = np.flatnonzero(used)
+                late = data.vertices[idx, 3] + st.start_offsets(data, idx) > st.time
+                used[idx[late]] = False
+            if used.any():
+                parts.append(data.vertices[used, :3].astype(np.float64) + data.origin)
+        tracks = [t for t in self.tracks or () if np.ndim(getattr(t, "points", ())) == 2 and len(t.points)]
+        if tracks:
+            from ..results.data import fair_shares
+
+            for t, budget in zip(tracks, fair_shares([len(t.points) for t in tracks], self.MAX_TRACK_POINTS)):
+                for a, b in t.ranges(budget):  # (las que se dibujan: _draw_tracks)
+                    parts.append(np.asarray(t.points[a:b, :3], dtype=float))
+        out = np.concatenate(parts) if parts else None
+        self._nav_tracks = (key, out, (data, self.tracks))  # (con ellos: sus id no pasan a otros mientras tanto)
+        return out
+
+    def _nav_point(self, x: float, y: float, translucent: bool = True) -> np.ndarray | None:
+        """Lo que se mira bajo el cursor, para acercarse a ello, girar a su alrededor y desplazarlo a su escala
+        (0.17.1): la superficie opaca (a través de lo translúcido) o un punto de una trayectoria dibujada a menos de
+        ``NAV_TRACK_RADIUS`` píxeles, lo más cercano a la cámara. Sin nada opaco, con ``translucent`` vale una
+        superficie translúcida (para girar y desplazar; para acercarse no, que no se podría pasar de ella). None si no
+        hay nada: entonces, el plano del objetivo, como antes."""
+        cands = []
+        w, h = max(1, self.canvas.width()), max(1, self.canvas.height())
+        if self.tracer is not None and self.session is not None and self.session.ok:
+            o, d = self.camera.ray(x, y, w, h)
+            t, kb, _ = self.tracer.first_visible(o, d, self._opaque_visibility(), self.clip(),
+                                                 mat_vis=self._mat_vis(opaque_only=True))
+            if kb <= 0 and translucent:
+                t, kb, _ = self.tracer.first_visible(o, d, self._vis_array(), self.clip(), mat_vis=self._mat_vis())
+            if kb > 0:
+                cands.append(o + t * d)
+        pts = self._track_points()
+        if pts is not None and len(pts):
+            px, z = self.camera.project(pts, w, h)
+            d2 = (px[:, 0] - x) ** 2 + (px[:, 1] - y) ** 2
+            ok = (z > 0) & (d2 <= self.NAV_TRACK_RADIUS ** 2)
+            if ok.any():
+                idx = np.flatnonzero(ok)
+                cands.append(pts[idx[np.argmin(d2[idx])]])
+        cands = [c for c in cands if self.camera.ortho or self.camera.depth_of(c) > 0.0]
+        if not cands:
+            return None
+        return min(cands, key=self.camera.depth_of)
+
     def _hover_pick(self) -> None:
         if self._hover_pos is None or self.tracer is None:
             return
@@ -1159,6 +1232,7 @@ class View3D(QWidget):
                 return
         self._press = (e.position(), e.button(), e.modifiers())
         self._press_cam = self.camera.copy()
+        self._press_pivot = None
         self._moved = False
 
     def on_move(self, e) -> None:
@@ -1188,12 +1262,19 @@ class View3D(QWidget):
         dx, dy = pos.x() - p0.x(), pos.y() - p0.y()
         if not self._moved and math.hypot(dx, dy) < 3:
             return
+        if not self._moved:
+            # Lo que se ha cogido (con la cámara de cuando se pulsó): se gira a su alrededor y se desplaza a su escala.
+            self._press_pivot = self._nav_point(p0.x(), p0.y())
         self._moved = True
         cam = self._press_cam.copy()
+        pivot = self._press_pivot
         pan = (button in (Qt.MouseButton.RightButton, Qt.MouseButton.MiddleButton)
                or (button == Qt.MouseButton.LeftButton and mods & Qt.KeyboardModifier.ShiftModifier))
         if pan:
-            cam.pan(dx, dy, max(1, self.canvas.height()))
+            depth = cam.depth_of(pivot) if pivot is not None else None
+            cam.pan(dx, dy, max(1, self.canvas.height()), depth=depth)
+        elif pivot is not None:
+            cam.orbit_about(pivot, -0.4 * dx, 0.4 * dy)
         else:
             cam.orbit(-0.4 * dx, 0.4 * dy)
             if self.view_name:
@@ -1237,8 +1318,18 @@ class View3D(QWidget):
         if steps == 0:
             return
         factor = 0.85 ** steps
-        # Acercar hacia el punto del cursor (en el plano del objetivo).
         pos = e.position()
+        if not self.camera.ortho:
+            # Hacia lo que hay bajo el cursor, a su profundidad: se queda en su píxel, nunca se pasa de largo y
+            # después girar y desplazar van a su escala (0.17.1; antes, hacia el plano del objetivo: algo pequeño
+            # delante o detrás de él no se acercaba o se perdía al girar).
+            target = self._nav_point(pos.x(), pos.y(), translucent=False)
+            if target is not None:
+                self.camera.dolly_toward(target, factor)
+                self._camera_changed(interactive=True)
+                self._end_interaction_later()
+                return
+        # Acercar hacia el punto del cursor (en el plano del objetivo).
         w, h = max(1, self.canvas.width()), max(1, self.canvas.height())
         right, up, _ = self.camera.basis()
         nx = 2.0 * pos.x() / w - 1.0
@@ -1329,10 +1420,8 @@ class View3D(QWidget):
             return np.zeros(len(pts), dtype=bool)
         o, d, dist = self.camera.rays_to(pts)
         # Solo tapan los cuerpos opacos: a través de los translúcidos la fuente se ve.
-        opaque = visibility_array(self.session.geo, {**self.material_visibility,
-                                                    **{m: HIDDEN for m, v in self.material_visibility.items()
-                                                       if v == TRANSLUCENT}}, self.hidden_bodies)
-        t, kb, _ = self.tracer.render(o, d, opaque, self.clip(), mat_vis=self._mat_vis(opaque_only=True))
+        t, kb, _ = self.tracer.render(o, d, self._opaque_visibility(), self.clip(),
+                                      mat_vis=self._mat_vis(opaque_only=True))
         scale = float(np.linalg.norm(self.scene_hi - self.scene_lo)) or 1.0
         return (kb > 0) & (t < dist - 1e-6 * scale)
 

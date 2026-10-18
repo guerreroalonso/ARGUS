@@ -122,7 +122,7 @@ def test_outputs_dialog(qtbot, cilindro_window):
     cards = dlg.cards
     assert cards["dosis"].check.isChecked() and "cilindro, 300 anillos" in cards["dosis"].state.text()
     assert cards["dosis"].editor.isVisibleTo(dlg) and isinstance(cards["dosis"].editor, DoseSection)
-    assert cards["trayectorias"].check.isChecked() and "(LTRACK 3:" in cards["trayectorias"].state.text()
+    assert "trayectorias" not in cards  # (0.17.1: las lluvias para verlas en 3D son «Lluvias», al ejecutar)
     assert not cards["seguir"].check.isChecked() and not cards["seguir"].editor.isVisibleTo(dlg)
     assert cards["salen"].check.isChecked() and not cards["salen"].check.isEnabled()  # siempre
     assert cards["deposito"].body_row.isVisibleTo(dlg)
@@ -149,12 +149,12 @@ def test_outputs_dialog(qtbot, cilindro_window):
     cards["dosis"].check.setChecked(False)
     dlg.flush_pending()
     assert sc.dose_grid(doc).kind == "none" and not cards["dosis"].editor.isVisibleTo(dlg)
-    cards["trayectorias"].check.setChecked(False)
+    cards["seguir"].check.setChecked(False)
     dlg.flush_pending()
-    assert sc.value(doc, "LTRACK") is None
+    assert sc.value(doc, "DUMPP") is None and not cards["seguir"].editor.isVisibleTo(dlg)
     # Cada cambio, un paso de deshacer (también desde el botón del diálogo).
     dlg.btn_undo.click()
-    assert sc.value(doc, "LTRACK") == [3]
+    assert sc.value(doc, "DUMPP") == [60.0]
     w.input.stack.undo()  # desde la ventana: el diálogo lo ve al volver al bucle de eventos
     assert sc.dose_grid(doc).kind == "cylinder"
     qtbot.waitUntil(lambda: cards["dosis"].check.isChecked(), timeout=5000)
@@ -164,6 +164,7 @@ def test_outputs_dialog(qtbot, cilindro_window):
     cards["dosis"].check.setChecked(True)
     dlg.flush_pending()
     assert sc.dose_grid(doc).kind == "box"
+    assert sc.value(doc, "LTRACK") == [3]  # el diálogo no lo toca (ni lo enseña)
     dlg.close()
 
 
@@ -176,8 +177,8 @@ def test_the_outputs_dialog_is_not_modal_and_follows_the_window(qtbot, cilindro_
     w.choose_outputs()
     assert w._outputs_dialog is dlg  # la misma
     # Lo que se cambia en la ventana (el panel, deshacer) se ve en el diálogo.
-    w.input.edit("prueba", lambda d: sc.set_value(d, "LTRACK", [7]))
-    qtbot.waitUntil(lambda: "8 lluvias (LTRACK 7:" in dlg.cards["trayectorias"].state.text(), timeout=5000)
+    w.input.edit("prueba", lambda d: sc.set_value(d, "DUMPP", [120.0]))
+    qtbot.waitUntil(lambda: "cada 120 s en dump.dmp" in dlg.cards["seguir"].state.text(), timeout=5000)
     dlg.close()
 
 

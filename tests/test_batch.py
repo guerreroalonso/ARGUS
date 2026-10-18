@@ -182,6 +182,13 @@ def test_batch_dialog(qtbot, case, tmp_path):
         dlg.follow.click()
     camp = BatchDialog(None, case, doc, app_settings(), "campana")
     qtbot.addWidget(camp)
+    # NSIMSH se llama «Partículas», como en «Trabajo» (era «Lluvias por variante»; «Lluvias», desde 0.17.1, solo las
+    # que se ven en 3D).
+    from PySide6.QtWidgets import QFormLayout
+
+    labs = [f.labelForField(camp.showers) for f in camp.findChildren(QFormLayout)]
+    labs = [lab.text() for lab in labs if lab is not None]
+    assert labs == ["Partículas por variante:"] and "NSIMSH" in camp.showers.toolTip()
     camp.p1.kind.setCurrentIndex(camp.p1.kind.findData("pos_z"))
     camp.p1.values.setText("-5:-3:1")
     camp.replicas.setValue(2)

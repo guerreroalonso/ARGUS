@@ -121,8 +121,9 @@ class _Reader:
             if not is_comment(rec):
                 return idx, rec
 
-    def error(self, line: int | None, message: str, code: int | None = None, reason: str | None = None):
-        self.diags.error(message, file=self.file, line=line, code=code, fortran_reason=reason)
+    def error(self, line: int | None, message: str, code: int | None = None, reason: str | None = None,
+              ichpar: int | None = None):
+        self.diags.error(message, file=self.file, line=line, code=code, fortran_reason=reason, ichpar=ichpar)
 
     def warning(self, line: int | None, message: str, code: int | None = None):
         self.diags.warning(message, file=self.file, line=line, code=code)
@@ -184,7 +185,7 @@ def _read_transform(reader: _Reader, code_unknown: int) -> tuple[list[ParamLine]
         name = PARAM_KEYWORDS.get(kw)
         if name is None or name not in TRANSFORM_PARAMS:
             reader.error(idx, f"Parámetro de transformación no reconocido: '{kw}'.", code_unknown,
-                         "GEOMIN: What do you mean?")
+                         "GEOMIN: What do you mean?", ichpar=ipar if ipar > 0 else None)
             raise _Abort()
         _warn_param_format(reader, idx, rec)
         params.append(ParamLine(name, value, ipar, unit, idx))
@@ -228,8 +229,11 @@ def _parse_surface(reader: _Reader, idx0: int, rec0: str, starred: bool) -> Surf
                 hint = ""
                 if kw.strip() and kw.strip() in {k.strip() for k in PARAM_KEYWORDS}:
                     hint = " (la palabra debe ir alineada a la derecha en 8 columnas)"
+                elif kw == KW_ONES:  # (décima revisión: la mutación más frecuente del fuzzer frente a GEOMIN)
+                    hint = (" (una línea de unos solo va en una superficie implícita; en la reducida, el giro y el "
+                            "desplazamiento son sus parámetros OMEGA…, X-SHIFT…)")
                 reader.error(idx, f"Parámetro no reconocido en superficie reducida: '{kw.rstrip()}'{hint}.",
-                             2012, "GEOMIN: What do you mean?")
+                             2012, "GEOMIN: What do you mean?", ichpar=ipar if ipar > 0 else None)
                 raise _Abort()
             # Con IPAR>0 el valor del fichero no se usa (lo sustituye PARINP):
             # la comprobación la hace el compilador con el valor efectivo.
@@ -257,7 +261,8 @@ def _parse_surface(reader: _Reader, idx0: int, rec0: str, starred: bool) -> Surf
             return el
         name = COEF_KEYWORDS.get(kw)
         if name is None:
-            reader.error(idx, f"Coeficiente no reconocido: '{kw.rstrip()}'.", 2014, "GEOMIN: What do you mean?")
+            reader.error(idx, f"Coeficiente no reconocido: '{kw.rstrip()}'.", 2014, "GEOMIN: What do you mean?",
+                         ichpar=ipar if ipar > 0 else None)
             raise _Abort()
         _warn_param_format(reader, idx, rec)
         el.params.append(ParamLine(name, value, ipar, unit, idx))
@@ -445,8 +450,10 @@ def parse_geo_text(text: str, path: str | None = None, included: bool = False) -
         try:
             idx, rec = reader.read_nc()
         except _EOF:
+            # GEOMIN lo ve al buscar el elemento siguiente, después de leer (y comprobar) los de antes: un error del
+            # último elemento sale antes (décima revisión, frente a GEOMIN). Se señala la última línea.
             diags.error("Fin de fichero sin línea END; PENGEOM se detendría con un error de lectura.",
-                        file=path, line=len(doc.lines) - 1)
+                        file=path, line=len(doc.lines) - 1, at_end=True)
             break
         kw = rec[:8]
         start = reader.i

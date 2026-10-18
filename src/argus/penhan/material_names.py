@@ -359,6 +359,8 @@ def formula_key(atoms, reduce: bool = True) -> str | None:
     acc: dict[int, int] = {}
     for z, n in items:
         n = float(n)
+        if not math.isfinite(n):
+            return None
         k = round(n)
         if k < 1 or abs(n - k) > 1e-6 * max(1.0, n):
             return None
@@ -503,7 +505,10 @@ def search(entries: list[ListEntry], query: str) -> list[ListEntry]:
 _GENERIC = {"mat", "material", "materiales", "de", "del", "la", "el", "los", "las", "y", "con", "sin", "en",
             "penelope", "nuevo", "nueva", "copia", "the", "of", "and"}
 # Unidades tras un número en el nombre del fichero («agua_5cm», «plomo_1in»): no son el símbolo de un elemento.
-_UNITS = re.compile(r"(\d+(?:[.,]\d+)?)\s*(?:cm|mm|um|µm|nm|m|in|inch|mil|g|kg|mev|kev|ev)(?![a-z])", re.IGNORECASE)
+# (Solo desde el principio de un número: si no, con una tira larga de cifras se probaba desde cada una y tardaba
+# segundos; décima revisión.)
+_UNITS = re.compile(r"(?<![0-9.,])(\d+(?:[.,]\d+)?)\s*(?:cm|mm|um|µm|nm|m|in|inch|mil|g|kg|mev|kev|ev)(?![a-z])",
+                    re.IGNORECASE)
 
 
 def _symbol_alias(entry: ListEntry, token: str) -> bool:

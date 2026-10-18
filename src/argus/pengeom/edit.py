@@ -1117,6 +1117,17 @@ def delete_problem(doc: GeoDocument, geo: CompiledGeometry, kb: int) -> str | No
     if not 1 <= kb <= geo.nbodys:
         return "No hay ningún cuerpo seleccionado."
     b = geo.body(kb)
+    sole = _sole_top_module_after(geo, kb)
+    if sole is not None:
+        out = root_escapes(geo, sole)
+        if out:
+            names = ", ".join(body_title(geo, k) for k in out[:3])
+            one = len(out) == 1
+            return (f"Al eliminarlo, {body_title(geo, sole)} quedaría solo arriba y PENGEOM no le añadiría la "
+                    f"envolvente: sería toda la geometría, y {names}, que {'asoma' if one else 'asoman'} fuera de "
+                    f"él, {'ocuparía' if one else 'ocuparían'} también lo de fuera (lejos de lo eliminado, donde no "
+                    f"había nada). Corrija antes {'esa hija' if one else 'esas hijas'} (Editar → «Buscar solapes "
+                    "en la geometría») o envuelva lo que queda en un módulo.")
     if kb == getattr(geo, "ct_body", None):
         if b.element is None or b.document is not geo.document:
             return "La caja CT está definida en un fichero INCLUDE: quítela allí."
@@ -1142,6 +1153,47 @@ def delete_problem(doc: GeoDocument, geo: CompiledGeometry, kb: int) -> str | No
     if isinstance(el, ModuleElement) and any(not r.is_surface for r in el.items):
         return "El módulo tiene cuerpos dentro: quítelos antes (o edite el fichero)."
     return None
+
+
+def _sole_top_module_after(geo: CompiledGeometry, kb: int) -> int | None:
+    """El módulo que quedaría solo arriba al quitar el elemento de primer nivel ``kb`` (None si no es el caso). Con
+    un solo elemento arriba, si es un módulo, GEOMIN no añade la envolvente y ese módulo es toda la geometría."""
+    if not getattr(geo, "enclosure_added", False):
+        return None
+    enc = next((b.index for b in geo.bodies if b.origin == "enclosure"), None)
+    if enc is None or geo.body(kb).mother != enc:
+        return None
+    tops = [b.index for b in geo.bodies if b.mother == enc and b.index not in (kb, enc)]
+    if len(tops) != 1 or not geo.body(tops[0]).is_module:
+        return None
+    return tops[0]
+
+
+def root_escapes(geo: CompiledGeometry, kb: int, n: int = 20000, seed: int = 31) -> list[int]:
+    """Hijas del módulo ``kb`` que asoman fuera de él, con puntos de muestra alrededor (hasta una vez su tamaño por
+    cada lado). Como raíz (sin la envolvente), LOCATE no mira sus superficies antes de buscar en sus hijas: lo que
+    asoma de una hija se convierte en material hasta donde llegue (décima revisión: con una hija sin tapa, hasta el
+    infinito)."""
+    from .extent import analytic_box, scene_box
+    from .overlap import _envelope, surface_signs
+
+    lo, hi = analytic_box(geo, kb)
+    if not (np.all(np.isfinite(lo)) and np.all(np.isfinite(hi)) and np.all(hi >= lo)):
+        lo, hi = scene_box(geo)
+    lo, hi = np.asarray(lo, dtype=float), np.asarray(hi, dtype=float)
+    if not (np.all(np.isfinite(lo)) and np.all(np.isfinite(hi))):
+        return []
+    size = np.maximum(hi - lo, 1e-6 * max(float(np.max(np.abs(np.r_[lo, hi]))), 1.0))
+    rng = np.random.default_rng(seed)
+    pts = rng.uniform(lo - size, hi + size, size=(n, 3))
+    tol = 1e-9 * max(float(np.max(size)), float(np.max(np.abs(np.r_[lo, hi]))), 1.0)
+    signs = surface_signs(geo, pts, tol)
+    em = _envelope(geo, kb, signs)
+    out = []
+    for d in dict.fromkeys(geo.body(kb).daughters):
+        if d != kb and np.any(_envelope(geo, d, signs) & ~em):
+            out.append(d)
+    return out
 
 
 def delete_body(doc: GeoDocument, geo: CompiledGeometry, kb: int) -> list[str]:

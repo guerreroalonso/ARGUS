@@ -30,7 +30,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ..core.diagnostics import DiagnosticList
+from ..core.diagnostics import Diagnostic, DiagnosticList, Severity
 from .ct import CtData, CtFormatError, load_ct
 from .model import (
     BodyElement,
@@ -297,6 +297,15 @@ class _Compiler:
             return None
         return kb
 
+    def undefined_ref(self, code: int, message: str, line: int | None) -> None:
+        """Una referencia a un cuerpo o módulo que no está definido antes. GEOMIN solo la busca si ya hay otros
+        elementos (``IF(NBODYS.GT.1)``, pengeom.f 925, 973 y 1222): en el primero no la comprueba y sigue con datos
+        que no existen. ARGUS la rechaza igual, pero sin el código de PENGEOM (décima revisión)."""
+        if len(self.B) <= 1:
+            self.fail(None, message + " PENGEOM no lo comprueba en el primer cuerpo o módulo del fichero: seguiría con "
+                                      "datos que no existen.", None, line)
+        self.fail(code, message, "GEOMIN: Undefined body label.", line)
+
     def check_new_body_label(self, alias: str, code: int, line: int | None) -> None:
         if alias in self.body_by_alias:
             self.fail(code, f"La etiqueta '{alias[:4].strip()}' ya se usa en otro cuerpo o módulo.",
@@ -453,8 +462,8 @@ class _Compiler:
             elif it.keyword == "BODY":
                 kb = self.find_body_before_last(a)
                 if kb is None:
-                    self.fail(2025, f"El cuerpo limitante '{it.label.strip()}' no está definido antes.",
-                              "GEOMIN: Undefined body label.", it.line)
+                    self.undefined_ref(2025, f"El cuerpo limitante '{it.label.strip()}' no está definido antes.",
+                                       it.line)
                 src = self.B[kb - 1]
                 if src.is_module:
                     self.fail(2026, f"'{it.label.strip()}' es un módulo; use 'MODULE  (...)' para referirse a él.",
@@ -464,8 +473,8 @@ class _Compiler:
             elif it.keyword == "MODULE":
                 kb = self.find_body_before_last(a)
                 if kb is None:
-                    self.fail(2028, f"El módulo limitante '{it.label.strip()}' no está definido antes.",
-                              "GEOMIN: Undefined body label.", it.line)
+                    self.undefined_ref(2028, f"El módulo limitante '{it.label.strip()}' no está definido antes.",
+                                       it.line)
                 src = self.B[kb - 1]
                 if not src.is_module:
                     self.fail(2029, f"'{it.label.strip()}' es un cuerpo; use 'BODY    (...)' para referirse a él.",
@@ -498,8 +507,8 @@ class _Compiler:
             elif it.keyword == "BODY":
                 kb = self.find_body_before_last(a)
                 if kb is None:
-                    self.fail(2040, f"El cuerpo '{it.label.strip()}' no está definido antes de este módulo.",
-                              "GEOMIN: Undefined body label.", it.line)
+                    self.undefined_ref(2040, f"El cuerpo '{it.label.strip()}' no está definido antes de este módulo.",
+                                       it.line)
                 d = self.B[kb - 1]
                 if d.is_module:
                     self.fail(2041, f"'{it.label.strip()}' es un módulo; use 'MODULE  (...)'.",
@@ -525,8 +534,8 @@ class _Compiler:
             elif it.keyword == "MODULE":
                 kb = self.find_body_before_last(a)
                 if kb is None:
-                    self.fail(2044, f"El módulo '{it.label.strip()}' no está definido antes de este módulo.",
-                              "GEOMIN: Undefined body label.", it.line)
+                    self.undefined_ref(2044, f"El módulo '{it.label.strip()}' no está definido antes de este módulo.",
+                                       it.line)
                 d = self.B[kb - 1]
                 if not d.is_module:
                     self.fail(2045, f"'{it.label.strip()}' es un cuerpo; use 'BODY    (...)'.",
@@ -973,13 +982,36 @@ def _read_until(el: Element, cut: int) -> Element:
     return t
 
 
+# El código del parámetro no reconocido → el de «NPINP is too small» en el mismo sitio de GEOMIN (pengeom.f compara
+# ICHPAR con NPINP antes de mirar la palabra: 461-476, 612-626, 694-708, 1390-1406, 1645-1658, 2258-2270).
+_NPINP_CODES = {2012: 2008, 2014: 2013, 2016: 2015, 2050: 2049, 2059: 2058, 2112: 2111}
+
+
+def _npinp_error(doc: GeoDocument, parinp) -> Diagnostic | None:
+    """Si el primer error de formato es un parámetro no reconocido cuya línea pide un PARINP que el .in no define,
+    lo que diría PENGEOM ahí (otro código; décima revisión, frente a GEOMIN). Lo del parser se queda: dice qué está
+    mal escrito."""
+    errs = [d for d in doc.diagnostics.errors if d.line is not None and d.file in (None, doc.path)]
+    if not errs:
+        return None
+    first = min(errs, key=lambda d: len(doc.lines) if d.at_end else d.line)
+    n = len(parinp or [])
+    if first.ichpar is None or first.ichpar <= n or first.code not in _NPINP_CODES:
+        return None
+    return Diagnostic(Severity.ERROR, f"Para PENGEOM, el error de esta línea es otro: usa PARINP({first.ichpar}) "
+                                      f"(columnas 33-36) y el .in define {n}.",
+                      file=first.file, line=first.line, code=_NPINP_CODES[first.code],
+                      fortran_reason="GEOMIN: NPINP is too small (check PARINP).")
+
+
 def _error_before_format_error(doc: GeoDocument, parinp, base, ct_loader) -> _CompileError | None:
     """El error que daría PENGEOM antes del primer error de formato (None si no hay): con los elementos de antes y
     con lo que se leyó del elemento donde está (GEOMIN lee línea a línea: una etiqueta repetida en la cabecera, una
     superficie que no existe o un lado 0 en una línea anterior se dan antes que el error de formato)."""
     import copy
 
-    lines = [d.line for d in doc.diagnostics.errors if d.line is not None and d.file in (None, doc.path)]
+    lines = [len(doc.lines) if d.at_end else d.line for d in doc.diagnostics.errors
+             if d.line is not None and d.file in (None, doc.path)]
     if not lines:
         return None
     cut = min(lines)
@@ -1027,6 +1059,10 @@ def compile_geometry(doc: GeoDocument, parinp: Sequence[float] | None = None,
         if early is not None:
             geo.diagnostics.error(early.message, file=early.doc.path if early.doc else doc.path, line=early.line,
                                   code=early.code, fortran_reason=early.reason)
+        else:
+            npinp = _npinp_error(doc, parinp)
+            if npinp is not None:
+                geo.diagnostics.items.append(npinp)
         geo.diagnostics.error("La geometría tiene errores de formato; corríjalos antes de compilarla.")
         return geo
     try:

@@ -209,7 +209,7 @@ def read_dump(path: str | os.PathLike) -> DumpInfo:
     p = Path(path)
     try:
         st = p.stat()
-    except OSError:
+    except (OSError, ValueError):  # ValueError: un nombre con un carácter NUL
         return DumpInfo(p, "missing", "El fichero no existe.")
     key = (str(p.resolve()), st.st_mtime_ns, st.st_size)
     hit = _CACHE.get(key)

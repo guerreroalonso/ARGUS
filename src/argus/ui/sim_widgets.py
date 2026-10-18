@@ -651,8 +651,10 @@ class DurationEdit(QWidget):
     ``maximum`` segundos. ``secondsEdited`` da los segundos de lo escrito."""
 
     secondsEdited = Signal(float)
+    cleared = Signal()  # con ``allow_empty``: se ha vaciado el campo
 
-    def __init__(self, parent=None, *, maximum: float = MAX_TIME, tooltip: str = "", settings=None):
+    def __init__(self, parent=None, *, maximum: float = MAX_TIME, tooltip: str = "", settings=None,
+                 allow_empty: bool = False):
         super().__init__(parent)
         self.maximum = float(maximum)
         self._seconds: float | None = None
@@ -660,7 +662,8 @@ class DurationEdit(QWidget):
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(4)
-        self.edit = NumberEdit(minimum=0.0, width=90, tooltip=tooltip)
+        self.edit = NumberEdit(minimum=0.0, width=90, tooltip=tooltip, allow_empty=allow_empty)
+        self.edit.cleared.connect(self._on_cleared)
         self.edit.format = _short_number  # type: ignore[method-assign]  # sin decimales de más al cambiar
         self.unit = QComboBox()
         for name, factor in TIME_UNITS:
@@ -707,6 +710,10 @@ class DurationEdit(QWidget):
             self._store().setValue(TIME_UNIT_KEY, self.unit.currentText())
         except Exception:  # noqa: BLE001
             pass
+
+    def _on_cleared(self) -> None:
+        self._seconds = None
+        self.cleared.emit()
 
     def _on_value(self, v: float) -> None:
         secs = v * self.factor

@@ -13,7 +13,7 @@ el mismo penhmain simula aparte la **cascada de partículas**: las trayectorias
 reales de las primeras lluvias, en 3D y animadas. ARGUS no incluye, modifica ni
 compila penhmain ni penhmat: usa los del usuario.
 
-## Estado (versión 0.17.0: fases F0 a F8, los ejecutables de Windows, macOS y Linux (sin instalar Python), el `.in` completo, el editor completo, la pestaña «Geometrías complejas» con el formato de PenGeomJar, detectores con formas habituales y celdas de detectores, nueve revisiones de fallos, el importador de TAC con los tejidos partidos por densidad, la carpeta de simulación, los `.mat` generados con el penhmat del usuario (de la lista de PENELOPE, que se busca al escribir, de los materiales personalizados de cada usuario o con una composición propia), los resultados de penhmain: verlos y analizarlos, simulaciones en paralelo y campañas, ejecutar penhmain en el terminal de cada sistema (en Windows, el de Linux o la consola) y la cascada de partículas en 3D, con la lluvia de cada trayectoria exacta)
+## Estado (versión 0.17.2: fases F0 a F8, los ejecutables de Windows, macOS y Linux (sin instalar Python), el `.in` completo, el editor completo, la pestaña «Geometrías complejas» con el formato de PenGeomJar, detectores con formas habituales y celdas de detectores, diez revisiones de fallos, el importador de TAC con los tejidos partidos por densidad, la carpeta de simulación, los `.mat` generados con el penhmat del usuario (de la lista de PENELOPE, que se busca al escribir, de los materiales personalizados de cada usuario o con una composición propia), los resultados de penhmain: verlos y analizarlos, simulaciones en paralelo y campañas, ejecutar penhmain en el terminal de cada sistema (en Windows, el de Linux o la consola) y la cascada de partículas en 3D, con la lluvia de cada trayectoria exacta)
 
 | Pieza | Estado |
 |---|---|
@@ -70,7 +70,9 @@ compila penhmain ni penhmat: usa los del usuario.
 | Matriz de dosis y resultados que pedir (ADR-017): el diálogo de resultados sin cerrar la ventana, cada resultado con su editor; la matriz por tamaño de vóxel (con los límites de penhmain), los vóxeles en el corte y en 3D, y estirarla o moverla con el ratón en 2D y 3D sin cambiar el vóxel | hecho |
 | Sexta revisión (ADR-017, 0.13.1): la cascada (semillas repetidas, NPSHOW, fuentes radiactivas y espacios de fases, ejecuciones que mueren o siguen de otra sesión), el visor (sin GPU, exportar, números de lluvia), «Ejecutar» (consola de Windows, volcados vacíos, copias canceladas o fallidas, el mismo penhmain para la cascada, el `.bat` con tildes), la matriz (deshacer, arrastres, `RESUME` con otra rejilla, «Seguir la simulación», la rejilla en la superficie) y los textos | hecho, cada fallo con su prueba; penhmain real |
 | Pantallas pequeñas (ADR-017): con la pantalla al 125 o 150 % (un portátil de 1920 × 1080 al 150 % tiene 1280 × 720 puntos) las ventanas y los diálogos caben: las filas de controles siguen en otra línea si no caben y el tamaño inicial no pasa del sitio libre de la pantalla | hecho, con una prueba que simula esa pantalla |
-| Ejecutables (ADR-022, 0.17.0): Windows (instalador; por omisión solo para el usuario, sin permisos de administrador), macOS (`.dmg`, Apple Silicon e Intel) y Linux (`.tar.gz`), sin instalar Python ni uv; con PyInstaller y las versiones de `uv.lock`; `ARGUS --comprobar` abre ARGUS sin preguntar nada, prueba Numba, la ventana con una geometría, la lectura de un TAC, las gráficas (PNG, PDF, SVG, EPS...), los GIF, el vídeo y OpenGL, y escribe un informe; paquetes con contraseña si se quiere (instalador con los ficheros cifrados, `.dmg` y `.7z` cifrados); el flujo de GitHub que construye y publica los cuatro paquetes, y la revisión de que en el repositorio no haya fuentes de PENELOPE, PenGeomJar, DICOM ni compilados | hecho: Windows y Linux construidos y comprobados aquí (Windows con Wine: el ejecutable, el instalador y el de contraseña); macOS, en GitHub, cuando esté el repositorio |
+| Ejecutables (ADR-022, 0.17.0): Windows (instalador; por omisión solo para el usuario, sin permisos de administrador), macOS (`.dmg`, Apple Silicon e Intel) y Linux (`.tar.gz`), sin instalar Python ni uv; con PyInstaller y las versiones de `uv.lock`; `ARGUS --comprobar` abre ARGUS sin preguntar nada, prueba Numba, la ventana con una geometría, la lectura de un TAC, las gráficas (PNG, PDF, SVG, EPS...), los GIF, el vídeo y OpenGL, y escribe un informe; paquetes con contraseña si se quiere (instalador con los ficheros cifrados, `.dmg` y `.7z` cifrados); el flujo de GitHub que construye y publica los cuatro paquetes, y la revisión de que en el repositorio no haya fuentes de PENELOPE, PenGeomJar, DICOM ni compilados | hecho: Windows y Linux construidos y comprobados aquí (Windows con Wine: el ejecutable, el instalador y el de contraseña); los cuatro, construidos, comprobados y publicados en GitHub (0.17.0, 18-10-2026) |
+| El desplegable, la vista 3D y «Lluvias» (ADR-023, 0.17.1): sin la carpeta de penhan (el ejecutable sin «Programas de penhan»), el desplegable del material usa la lista de PENELOPE que trae ARGUS (la misma); en 3D, la rueda acerca hacia lo que hay bajo el cursor (una superficie o una trayectoria) sin pasarse, y se gira alrededor de lo que se coge y se desplaza a su escala: lo pequeño no se pierde; «Lluvias», un solo número (de 1 a 1000) sin tandas ni carpetas, y «Trayectorias» (`LTRACK`) ya no se elige aparte; Guardar ya no pierde el nombre del material recién escrito con su lista desplegada | hecho, con sus pruebas; falta probarlo en Windows (con GPU) |
+| Décima revisión, búsqueda aleatoria de fallos (ADR-024, 0.17.2): con PENGEOM y PMRDR reales (1407 `.geo` mutados, 1297 `.in` generados, cadenas del editor al azar), ficheros dañados (unos 16 000 resultados, volcados, espectros, bibliotecas, DICOM, `.ct`), una prueba de mono de la ventana y la navegación 3D: los errores de GEOMIN sin END, con un PARINP que falta y en el primer elemento; «Eliminar» ya no deja un módulo solo con una hija que asoma; fórmulas con caracteres que no son ASCII, cabeceras sin sentido, PixelSpacing 0, un NUL en el volcado, espectros que se desbordan o van al revés y un GRIDR enorme se dicen en lugar de fallar; «Ejecutar» guarda también la geometría; los diálogos del editor paran su comprobación al cerrarse; en «Trabajo», las semillas que admite RANECU y los campos que se pueden vaciar; en 3D solo se coge lo que se dibuja | hecho, cada uno de los 21 fallos con su prueba (49 nuevas; salvo tres controles, todas fallan con el código de 0.17.1) |
 
 ## Uso rápido
 
@@ -104,21 +106,24 @@ compila penhmain ni penhmat: usa los del usuario.
   ya extensa, se marca o se quita el cuerpo como activo y «Añadir a los cuerpos
   activos ▸» añade su parte o todo su órgano; si la caja no cubre lo añadido,
   se ajusta (Deshacer la deja como estaba).
-* **Vista 3D**: arrastrar para girar, `Mayús`+arrastrar o botón derecho para
-  desplazar, rueda para acercar (hacia el cursor), doble clic para girar
-  alrededor de un punto, clic para seleccionar un cuerpo, `Inicio` para
-  encuadrar. En la barra de la vista: orientaciones (±X, ±Y, ±Z, isométrica),
-  proyección ortográfica y **corte** (ocultar x > x₀, y > y₀, z > z₀, una
-  esquina o todo lo que hay delante del corte 2D). Con el botón derecho sobre
-  un cuerpo: apuntar el haz o colocar la fuente allí (en la superficie o a
-  mitad de su espesor), la fuente extensa en el cuerpo, en su parte del órgano
-  o en todo él (como en el corte), llevar el corte 2D a ese punto, ocultar el cuerpo o
-  hacer su material translúcido. La columna «3D» del panel «Materiales» cambia
-  cada material entre opaco, translúcido y oculto. La fuente, su caja, el cono
-  de emisión, la rejilla de dosis y el plano del corte 2D se dibujan encima;
-  lo que queda tapado por la geometría, punteado. Si la tarjeta gráfica no
-  tiene OpenGL 4.1 (escritorio remoto, máquina virtual), la vista 3D se
-  calcula en la CPU; `argus --cpu3d` o Ver → «Vista 3D sin GPU» lo fuerzan.
+* **Vista 3D**: arrastrar para girar (alrededor de lo que se coge),
+  `Mayús`+arrastrar o botón derecho para desplazar (lo cogido sigue al ratón),
+  rueda para acercar hacia lo que hay bajo el cursor (una superficie o una
+  trayectoria: se queda en su sitio y nunca se pasa, así que lo pequeño no se
+  pierde), doble clic para girar alrededor de un punto, clic para seleccionar
+  un cuerpo, `Inicio` para encuadrar. En la barra de la vista: orientaciones
+  (±X, ±Y, ±Z, isométrica), proyección ortográfica y **corte** (ocultar x >
+  x₀, y > y₀, z > z₀, una esquina o todo lo que hay delante del corte 2D). Con
+  el botón derecho sobre un cuerpo: apuntar el haz o colocar la fuente allí
+  (en la superficie o a mitad de su espesor), la fuente extensa en el cuerpo,
+  en su parte del órgano o en todo él (como en el corte), llevar el corte 2D a
+  ese punto, ocultar el cuerpo o hacer su material translúcido. La columna
+  «3D» del panel «Materiales» cambia cada material entre opaco, translúcido y
+  oculto. La fuente, su caja, el cono de emisión, la rejilla de dosis y el
+  plano del corte 2D se dibujan encima; lo que queda tapado por la geometría,
+  punteado. Si la tarjeta gráfica no tiene OpenGL 4.1 (escritorio remoto,
+  máquina virtual), la vista 3D se calcula en la CPU; `argus --cpu3d` o Ver →
+  «Vista 3D sin GPU» lo fuerzan.
 * **Editar la geometría** (panel «Editar»): material, nombre, parámetros de
   las superficies del cuerpo seleccionado (escalas, ángulos, desplazamientos)
   y giro y desplazamiento de los módulos. Con el botón derecho en el corte, en
@@ -365,8 +370,9 @@ compila penhmain ni penhmat: usa los del usuario.
     arrastrarla (esquinas y centro de la caja; radio y extremos del cilindro).
   * *Proceso externo* (`EPROF`) y *trabajo*: partículas (`NSIMSH`), tiempo
     (con unidades, hasta 10⁹ s), semillas (o par precalculado), `RESUME`,
-    `DUMPTO`, `DUMPP` y las trayectorias de la simulación (`LTRACK`), con lo
-    que hay en los ficheros de volcado de la carpeta.
+    `DUMPTO` y `DUMPP`, con lo que hay en los ficheros de volcado de la
+    carpeta. (`LTRACK` ya no se elige aquí: las lluvias para verlas en 3D son
+    «Lluvias», al ejecutar; si el `.in` lo trae, se respeta.)
 * **Comprobaciones de penhmain**: además de las de la fuente y los materiales,
   ARGUS reproduce todas las de la subrutina PMRDR con sus códigos `IRETRN`
   (cuerpos que no existen o vacíos, campos en el vacío, forzado incompatible,
@@ -438,8 +444,8 @@ compila penhmain ni penhmat: usa los del usuario.
 * **Qué resultados pedir** (Simulación → Elegir qué resultados pide el .in…):
   la dosis (matriz de vóxeles: caja, cilindro o esfera), lo que entra en un
   cuerpo (espectro, fluencia, espacio de fases), la energía depositada, los
-  detectores angulares, lo que sale de la geometría, seguir la simulación y las
-  trayectorias. Marcar uno lo pide con valores razonables (respetando las reglas
+  detectores angulares, lo que sale de la geometría y seguir la simulación.
+  Marcar uno lo pide con valores razonables (respetando las reglas
   de penhmain) y enseña debajo su editor: la matriz con su tamaño de vóxel (Δx,
   Δy, Δz: se calcula el número de intervalos, impar en X e Y si se quiere, con
   los límites de penhmain y lo que ocupará `3d-dose-map.dat`), las ventanas de
@@ -464,11 +470,9 @@ compila penhmain ni penhmat: usa los del usuario.
   **Partículas** (`NSIMSH`: las partículas primarias que se simulan, cada una
   con su lluvia), el **tiempo máximo** en s, min, h, días o semanas (como
   mucho 10⁹ s; vacío, sin límite) y **Lluvias**: cuántas de las primeras se
-  siguen para verlas en 3D (la cascada; como mucho 1000; 0, ninguna). La
-  cascada se simula aparte en tandas de 50 (lo que guarda penhmain como mucho:
-  1000 lluvias son 20 ejecuciones de 50); no es lo mismo que las
-  **Trayectorias** de los resultados (`LTRACK`), que son las primeras lluvias
-  de la simulación en sus `.trk` (también como mucho 50). Con `RESUME`, penhmain sigue la
+  ven en 3D (de 1 a 1000; «ninguna», sin ellas). Es lo único que hay que
+  elegir: ARGUS las simula aparte, a la vez que la simulación (la cascada).
+  Con `RESUME`, penhmain sigue la
   simulación guardada con sus rejillas e intervalos: si el `.in` pide otros,
   ARGUS lo dice. Con errores que pararían a penhmain, no ejecuta (salvo que se
   diga); los `.mat` que faltan se generan desde el mismo diálogo.

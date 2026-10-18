@@ -266,7 +266,11 @@ class BatchDialog(QDialog):
             self.showers.setDecimals(0)
             self.showers.setRange(1, 1e15)
             self.showers.setValue(nsim)
-            form.addRow("Lluvias por variante:", self.showers)
+            # (Era «Lluvias por variante»: es NSIMSH, como «Partículas» en «Trabajo»; «Lluvias» es solo el número de
+            # las que se ven en 3D, al ejecutar.)
+            self.showers.setToolTip("NSIMSH de cada variante: partículas primarias que se simulan (cada una con su "
+                                    "lluvia), repartidas entre sus ejecuciones")
+            form.addRow("Partículas por variante:", self.showers)
             self.same_seeds = QCheckBox("Las mismas semillas en todas las variantes (diferencias con menos ruido)")
             self.same_seeds.toggled.connect(self._preview)
             form.addRow(self.same_seeds)

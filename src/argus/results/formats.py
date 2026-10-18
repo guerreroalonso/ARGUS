@@ -18,6 +18,7 @@ pero sí puede hacerlo en las incertidumbres.
 from __future__ import annotations
 
 import io
+import math
 import os
 import re
 import warnings
@@ -217,7 +218,11 @@ def header_number(lines: list[str], key: str, default: float | None = None) -> f
 
 def header_int(lines: list[str], key: str, default: int | None = None) -> int | None:
     v = header_number(lines, key)
-    return default if v is None else int(round(v))
+    if v is None:
+        return default
+    if not math.isfinite(v):
+        raise FormatError(f"«{key} {v}» en la cabecera no es un número de intervalos")
+    return int(round(v))
 
 
 def key_values(text: str) -> dict[str, float]:

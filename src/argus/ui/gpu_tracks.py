@@ -45,6 +45,12 @@ STRIDE = 8 * 4  # x, y, z, t, logE, kind, shower, gen (float32)
 MODES = {"particle": 0, "energy": 1, "shower": 2, "generation": 3}
 
 
+def track_near(distance: float) -> float:
+    """El plano cercano de las líneas (cm): 1 µm o, si se mira algo a menos de 1 cm, una diezmilésima de esa
+    distancia (lo que haya más cerca de la cámara no se dibuja)."""
+    return min(1.0e-4, 1.0e-4 * max(float(distance), 1.0e-12))
+
+
 def _wide_program() -> QOpenGLShaderProgram | None:
     """El programa de las líneas con grosor (con geometry shader), o None si la tarjeta no lo acepta."""
     prog = QOpenGLShaderProgram()
@@ -130,9 +136,13 @@ class GpuTrackLayer:
     # -- dibujo ---------------------------------------------------------------------------------------------------
     @staticmethod
     def camera_uniforms(frame: dict, width: int, height: int) -> dict:
-        """Los de la proyección (los del trazado de la imagen: misma cámara y mismo origen flotante)."""
+        """Los de la proyección (los del trazado de la imagen: misma cámara y mismo origen flotante). El plano
+        cercano, a 1 µm de la cámara o, más cerca de algo pequeño, a una diezmilésima de lo que se mira (0.17.1: la
+        rueda acerca la cámara hacia lo que hay bajo el cursor y, con 1 µm fijo, se dejaba de ver lo que se miraba)."""
+        tan = float(frame["uTan"])
+        dist = float(frame["uHalf"]) / tan if tan > 0 else 1.0  # (la distancia al objetivo)
         return {k: frame[k] for k in ("uCamPos", "uRight", "uUp", "uFwd", "uTan", "uHalf", "uOrtho")} | {
-            "uAspect": float(width) / float(max(height, 1)), "uNear": 1.0e-4}
+            "uAspect": float(width) / float(max(height, 1)), "uNear": track_near(dist)}
 
     def draw(self, data: TrackLayerData, style: TrackStyle, frame: dict, origin: np.ndarray, width: int,
              height: int, depth_texture: int | None, eps: float) -> None:

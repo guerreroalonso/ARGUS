@@ -104,11 +104,18 @@ def read_axis_dose(path: Path, ident: Identified) -> Curves:
     return _curves(ident.kind, t[:, 0], [s], axis, "cm", "Dosis", "eV/g", meta=meta)
 
 
+def _check_header(path: Path, limits, counts) -> None:
+    """Límites finitos y al menos un intervalo en cada eje (si no, el fichero está dañado)."""
+    if any(not np.isfinite(v) for v in limits) or any(n < 1 for n in counts):
+        raise FormatError(f"{path.name}: la cabecera tiene límites o números de intervalos que no tienen sentido")
+
+
 def _box_header(lines: list[str], path: Path) -> tuple[list[float], list[int]]:
     lims = [header_number(lines, k) for k in ("XL =", "XU =", "YL =", "YU =", "ZL =", "ZU =")]
     nb = [header_int(lines, k) for k in ("NBX =", "NBY =", "NBZ =")]
     if any(v is None for v in lims) or any(v is None for v in nb):
         raise FormatError(f"{path.name}: falta la cabecera con los límites y el número de intervalos")
+    _check_header(path, lims, nb)
     return [float(v) for v in lims], [int(v) for v in nb]
 
 
@@ -147,6 +154,7 @@ def read_2d_dose(path: Path, ident: Identified) -> Grid:
     nbr, nbz = header_int(lines, "NBR ="), header_int(lines, "NBZ =")
     if None in (ru, zl, zu, nbr, nbz):
         raise FormatError(f"{path.name}: falta la cabecera del cilindro de dosis")
+    _check_header(path, (ru, zl, zu), (nbr, nbz))
     t = load_table(path)
     _need_cols(t, 6, path)
     n = nbr * nbz
@@ -166,6 +174,7 @@ def read_radial_dose(path: Path, ident: Identified) -> Grid:
     ru, nbr = header_number(lines, "RU ="), header_int(lines, "NBR =")
     if ru is None or nbr is None:
         raise FormatError(f"{path.name}: falta la cabecera de la esfera de dosis")
+    _check_header(path, (ru,), (nbr,))
     t = load_table(path)
     _need_cols(t, 5, path)
     if len(t) < nbr:
@@ -401,6 +410,7 @@ def read_p3d_cyl(path: Path, ident: Identified) -> Grid:
     nbr, nbz = header_int(lines, "NBR ="), header_int(lines, "NBZ =")
     if None in (ru, zl, zu, nbr, nbz):
         raise FormatError(f"{path.name}: falta la cabecera del cilindro")
+    _check_header(path, (ru, zl, zu), (nbr, nbz))
     t = load_table(path)
     _need_cols(t, 4, path)
     n = nbr * nbz
@@ -419,6 +429,7 @@ def read_p3d_sphere(path: Path, ident: Identified) -> Grid:
     ru, nbr = header_number(lines, "RU ="), header_int(lines, "NBR =")
     if ru is None or nbr is None:
         raise FormatError(f"{path.name}: falta la cabecera de la esfera")
+    _check_header(path, (ru,), (nbr,))
     t = load_table(path)
     _need_cols(t, 5, path)
     if len(t) < nbr:

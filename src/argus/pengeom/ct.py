@@ -307,6 +307,12 @@ def read_ct_bytes(raw: bytes) -> CtData:
     title, size, shape, pos = _header(raw)
     nx, ny, nz = shape
     n = nx * ny * nz
+    # Cada vóxel es una lectura (READ(IRJ,*) MC,DC): al menos un registro de dos caracteres («/» y su fin de línea).
+    # Con menos, la cabecera no es la de este fichero; mejor decirlo que reservar memoria para lo que no hay
+    # (décima revisión: con «8 6 120000000» en 8 kB, MemoryError de 21,5 GiB).
+    if len(raw) - pos < 2 * n - 1:
+        raise CtFormatError(f"Fin de fichero inesperado en el fichero CT (la cabecera dice {nx} × {ny} × {nz} vóxeles "
+                            "y el fichero no los tiene).")
     fast = _fast_body(raw[pos:], n)
     if fast is None:
         lines = text_records(raw[pos:].decode("latin-1"))

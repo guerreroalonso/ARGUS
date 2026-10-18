@@ -25,7 +25,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QScrollArea,
-    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -97,40 +96,6 @@ class FollowSection(Section):
         self.dump.set_name(sc.text(doc, "DUMPTO") or "")
 
 
-class TrackSection(Section):
-    """LTRACK: las lluvias cuyas trayectorias escribe penhmain (como mucho 50)."""
-
-    title = "Trayectorias"
-    keywords = {"LTRACK"}
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(4, 2, 4, 4)
-        self.n = QSpinBox()
-        self.n.setRange(1, 50)
-        self.n.setKeyboardTracking(False)
-        self.n.valueChanged.connect(lambda n: self.edit("Lluvias para visualizar", lambda d: sc.set_value(
-            d, "LTRACK", [int(n)])))
-        lay.addWidget(row("Las primeras", self.n, "lluvias de esta simulación"))
-        note = QLabel("penhmain guarda en sus .trk las trayectorias de esas lluvias y de una más (mira si ha pasado de "
-                      "las pedidas después de cada una): como mucho 51 por ejecución, un límite fijo de penhmain. Para "
-                      "ver muchas más en 3D y animadas: la cascada de partículas («Lluvias» al ejecutar, o en la "
-                      "ventana de resultados), que ARGUS simula aparte en tandas de 50.")
-        note.setWordWrap(True)
-        note.setStyleSheet("color: #666;")
-        lay.addWidget(note)
-
-    def refresh(self) -> None:
-        doc = self.doc
-        if doc is None:
-            return
-        v = sc.value(doc, "LTRACK")
-        self.n.blockSignals(True)
-        self.n.setValue(min(max(int(v[0]) if v else 10, 1), 50))
-        self.n.blockSignals(False)
-
-
 # ---------------------------------------------------------------------------------------------------------------------
 # Los resultados que se pueden pedir
 # ---------------------------------------------------------------------------------------------------------------------
@@ -164,9 +129,7 @@ CARDS = [
     Card("seguir", "Seguir la simulación mientras corre",
          "Todos los resultados y un volcado cada DUMPP segundos: ARGUS los va enseñando y la simulación se puede "
          "reanudar (RESUME)."),
-    Card("trayectorias", "Trayectorias de las primeras lluvias (LTRACK)",
-         "Un fichero .trk por tipo de partícula (electron.trk, photon.trk…), para verlas sobre la geometría."),
-]
+]  # (las lluvias para verlas en 3D se eligen al ejecutar: «Lluvias», de 1 a 1000)
 CARDS_BY_KEY = {c.key: c for c in CARDS}
 
 
@@ -214,8 +177,6 @@ def present(doc, key: str) -> str:
         return "siempre"
     if key == "seguir":
         return gl.status(doc, "seguir")
-    if key == "trayectorias":
-        return gl.status(doc, "trayectorias")
     raise KeyError(key)
 
 
@@ -232,7 +193,7 @@ def add(doc, key: str, *, geo=None, bounds=None, kb: int | None = None) -> str:
         dets.append(sc.AngularDetector(0.0, 90.0, 0.0, 360.0))
         sc.set_angular_detectors(doc, dets)
         return f"detector angular {len(dets)} (θ de 0 a 90°: lo que sale hacia delante)"
-    if key in ("seguir", "trayectorias"):
+    if key == "seguir":
         return gl.apply(doc, key)
     raise KeyError(key)
 
@@ -249,14 +210,12 @@ def remove(doc, key: str) -> None:
         sc.set_angular_detectors(doc, [])
     elif key == "seguir":
         gl.unfollow(doc)
-    elif key == "trayectorias":
-        sc.set_value(doc, "LTRACK", None)
     else:
         raise KeyError(key)
 
 
 EDITORS = {"dosis": DoseSection, "impacto": ImpactSection, "deposito": EnergySection, "angular": AngularSection,
-           "salen": EmergingSection, "seguir": FollowSection, "trayectorias": TrackSection}
+           "salen": EmergingSection, "seguir": FollowSection}
 
 
 class _CardWidget(QFrame):
@@ -517,5 +476,5 @@ class OutputsDialog(QDialog):
         return {k: w.check for k, w in self.cards.items()}
 
 
-__all__ = ["CARDS", "Card", "FollowSection", "OutputsDialog", "TrackSection", "add", "matter_bounds", "present",
+__all__ = ["CARDS", "Card", "FollowSection", "OutputsDialog", "add", "matter_bounds", "present",
            "remove"]

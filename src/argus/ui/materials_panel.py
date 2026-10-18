@@ -35,9 +35,10 @@ from PySide6.QtWidgets import (
 from ..core.numfmt import plural
 from ..penhan.material_names import penelope_entries
 from ..penhan.materials import (
+    builtin_material_list,
     find_material_list,
-    load_material_list,
     mat_filename_problem,
+    material_list_or_builtin,
     material_recipe,
     materials_table,
     set_material,
@@ -121,7 +122,8 @@ class MaterialsPanel(QWidget):
         self.visibility: dict[int, int] = {}
         self._updating = False
         self._deferred = DeferredEdits()
-        self._mlist: list[tuple[int, str]] = []
+        # La lista de PENELOPE para el desplegable: la de la base de datos o, si no se encuentra, la que trae ARGUS.
+        self._mlist: list[tuple[int, str]] = builtin_material_list()
         self._mlist_path = None
         self.unknown: list = []  # materiales que ARGUS no sabe de qué están hechos (para «Asignar materiales…»)
         self.library = None  # los materiales personalizados del usuario (argus.penhan.library.Library)
@@ -221,7 +223,7 @@ class MaterialsPanel(QWidget):
         path = path or find_material_list(self._folder())
         if path != self._mlist_path:
             self._mlist_path = path
-            self._mlist = load_material_list(path) if path is not None else []
+            self._mlist = material_list_or_builtin(path)
         self.reload_library()
 
     def reload_library(self) -> None:

@@ -81,6 +81,12 @@ class AssignMaterialsDialog(QDialog):
                           "materiales personalizados.</span>")
             warn.setWordWrap(True)
             lay.addWidget(warn)
+        elif getattr(self.mlist, "builtin", False):
+            note = QLabel("La lista de PENELOPE es la que trae ARGUS: no se ha encontrado la de su penhan. Para "
+                          "generar los .mat hará falta su carpeta (Opciones → Programas de penhan…).")
+            note.setWordWrap(True)
+            note.setStyleSheet("color: #666;")
+            lay.addWidget(note)
         grid_host = QWidget()
         grid = QGridLayout(grid_host)
         grid.setColumnStretch(1, 1)

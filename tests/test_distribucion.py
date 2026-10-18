@@ -421,6 +421,19 @@ def test_the_workflow_builds_the_four_packages_from_the_lock():
     assert (ROOT / "uv.lock").is_file()
 
 
+def test_the_version_is_the_same_everywhere():
+    """La de ``pyproject.toml`` (la de los paquetes y la etiqueta de la publicación) es la que dice ARGUS (Ayuda →
+    Acerca de ARGUS, ``--comprobar``) y la de ``uv.lock``: al subirla (0.17.1), en los tres sitios."""
+    import tomllib
+
+    import argus
+
+    version = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+    lock = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))
+    mine = [p for p in lock["package"] if p["name"] == "argus"]
+    assert argus.__version__ == version and len(mine) == 1 and mine[0]["version"] == version
+
+
 def test_the_workflow_installs_what_qt_multimedia_needs_on_linux():
     """Qt Multimedia (los vídeos de la cascada) necesita libpulse.so.0 del sistema: sin ella fallaban la comprobación
     del ejecutable de Linux y la de las pruebas en la primera ejecución en GitHub (18-10-2026). PyInstaller la mete en

@@ -1776,6 +1776,12 @@ class MainWindow(QMainWindow):
         while p is not None and p is not self:
             p = p.parentWidget()
         if p is self:
+            # Con su lista desplegada (el nombre del material enseña lo que coincide con lo escrito), el campo no se
+            # confirma al perder el foco: es lo que pasa al abrirse la lista. Se cierra antes, y lo escrito se guarda
+            # (0.17.1: con la lista de ARGUS siempre hay lista, y Guardar perdía el nombre recién escrito).
+            popup = QApplication.activePopupWidget()
+            if popup is not None:
+                popup.hide()
             w.clearFocus()  # como al salir del campo: se confirma (o se descarta si no es válido)
 
     def _settle(self) -> bool:

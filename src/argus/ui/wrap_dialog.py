@@ -195,6 +195,12 @@ class WrapDialog(QDialog):
         find, parinp = body_finder(self.geo), self.session.parinp
         return lambda doc, g: wrap(doc, g, [find(g, k) for k in chosen], prim, mat, name, parinp)
 
+    def done(self, r: int) -> None:
+        # Cerrado (Aceptar, Cancelar o Esc): la comprobación que quedaba pendiente ya no es de nadie; si saltara
+        # después, miraría los cuerpos de entonces en la geometría de ahora (décima revisión).
+        self._timer.stop()
+        super().done(r)
+
     def accept(self) -> None:
         self._timer.stop()
         self._check()

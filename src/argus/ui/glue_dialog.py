@@ -163,6 +163,12 @@ class GlueDialog(QDialog):
         return lambda doc, g: pl.move_element(doc, g, g.find_body(label).index, pl.translation(delta), s.parinp,
                                               bounds=s.bounds) or True
 
+    def done(self, r: int) -> None:
+        # Cerrado (Aceptar, Cancelar o Esc): la comprobación que quedaba pendiente ya no es de nadie; si saltara
+        # después, miraría los cuerpos de entonces en la geometría de ahora (décima revisión).
+        self._timer.stop()
+        super().done(r)
+
     def accept(self) -> None:
         self._timer.stop()
         self._update()

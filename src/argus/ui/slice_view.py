@@ -40,6 +40,22 @@ SOURCE_COLOR = (255, 127, 14)
 MODULE_COLOR = (170, 120, 255)
 HANDLE_RADIUS = 11.0
 MIN_VOXEL_PX = 4.0  # los vóxeles de la rejilla de dosis se dibujan si miden al menos esto en pantalla
+BIG_PX = 1.0e9  # lo que está más lejos (en píxeles) se dibuja aquí: Qt no dibuja infinitos
+
+
+def _half_chord(r: float, d: float) -> float:
+    """√(r² − d²) sin desbordarse con radios enormes («GRIDR 1e200»: r ** 2 lanzaba OverflowError al pintar; décima
+    revisión)."""
+    a = abs(d)
+    return math.sqrt(max(r - a, 0.0) * (r + a)) if r > a else 0.0
+
+
+def _px(v: float) -> float:
+    return min(max(v, -BIG_PX), BIG_PX) if math.isfinite(v) else (BIG_PX if v > 0 else -BIG_PX)
+
+
+def _pt(q: QPointF) -> QPointF:
+    return QPointF(_px(q.x()), _px(q.y()))
 BROKEN_GEOMETRY_TEXT = ("La geometría tiene errores: véalos en el panel de mensajes (en «Geometrías complejas», "
                         "debajo del texto).")
 
@@ -131,14 +147,18 @@ def _grid_step(scale: float) -> float:
     return 10.0 ** math.floor(math.log10(max(scale, 1e-12)))
 
 
+MAX_GRID_CM = 1.0e9  # cm: mucho más que la envolvente de PENGEOM (1e7 cm), fuera de la cual no hay nada
+
+
 def finite_region(reg) -> bool:
-    """¿Tiene la rejilla de dosis (``render.source2d.DoseRegion``) solo números finitos? Con Inf o NaN en el .in
-    no se dibuja ni se lleva el corte a ella."""
+    """¿Tiene la rejilla de dosis (``render.source2d.DoseRegion``) solo números finitos y de un tamaño con sentido? Con
+    Inf o NaN en el .in, o con valores de más de ``MAX_GRID_CM`` («GRIDR 1e200»: décima revisión), no se dibuja ni se
+    lleva el corte a ella."""
     vals = [reg.radius, reg.zlo, reg.zhi]
     for arr in (reg.lo, reg.hi):
         if arr is not None:
             vals += [float(v) for v in arr]
-    return all(math.isfinite(float(v)) for v in vals)
+    return all(math.isfinite(float(v)) and abs(float(v)) <= MAX_GRID_CM for v in vals)
 
 
 MIN_SCALE = 1.0e-9  # cm por píxel: 10 fm
@@ -774,10 +794,10 @@ class SliceViewWidget(QWidget):
             for k in range(1, n):
                 c = lo + (hi - lo) * k / n
                 if horizontal:
-                    y = self._to_px(0.0, c).y()
+                    y = _px(self._to_px(0.0, c).y())
                     p.drawLine(QPointF(rect.left(), y), QPointF(rect.right(), y))
                 else:
-                    x = self._to_px(c, 0.0).x()
+                    x = _px(self._to_px(c, 0.0).x())
                     p.drawLine(QPointF(x, rect.top()), QPointF(x, rect.bottom()))
         p.restore()
 
@@ -798,13 +818,13 @@ class SliceViewWidget(QWidget):
                 zlo, zhi, nz = g.z
                 if nz > 1 and abs(zhi - zlo) / nz / self.scale >= MIN_VOXEL_PX:
                     for q in range(1, nz):
-                        y = self._to_px(0.0, zlo + (zhi - zlo) * q / nz).y()
+                        y = _px(self._to_px(0.0, zlo + (zhi - zlo) * q / nz).y())
                         p.drawLine(QPointF(rect.left(), y), QPointF(rect.right(), y))
                 if dr / self.scale >= MIN_VOXEL_PX:
                     for q in range(1, nr):
                         rq = q * dr
                         if rq > abs(d):
-                            half = math.sqrt(rq * rq - d * d) / self.scale
+                            half = _px(_half_chord(rq, d) / self.scale)
                             for sx in (-1.0, 1.0):
                                 x = center.x() + sx * half
                                 p.drawLine(QPointF(x, rect.top()), QPointF(x, rect.bottom()))
@@ -812,9 +832,8 @@ class SliceViewWidget(QWidget):
             # Corte perpendicular al eje (cilindro) o cualquier corte (esfera): circunferencias.
             for q in range(1, nr):
                 rq = q * dr
-                rr = rq * rq - (0.0 if cyl else d * d)
-                if rr > 0:
-                    rp = math.sqrt(rr) / self.scale
+                if rq > (0.0 if cyl else abs(d)):
+                    rp = _px(_half_chord(rq, 0.0 if cyl else d) / self.scale)
                     p.drawEllipse(center, rp, rp)
         p.restore()
 
@@ -852,8 +871,8 @@ class SliceViewWidget(QWidget):
         if reg.kind == "box":
             if not reg.lo[k] <= d <= reg.hi[k]:
                 return
-            q0 = self._to_px(reg.lo[iu], reg.lo[iv])
-            q1 = self._to_px(reg.hi[iu], reg.hi[iv])
+            q0 = _pt(self._to_px(reg.lo[iu], reg.lo[iv]))
+            q1 = _pt(self._to_px(reg.hi[iu], reg.hi[iv]))
             rect = QRectF(q0, q1).normalized()
             if g.kind == "box":
                 self._draw_voxels_box(p, g, iu, iv, rect)
@@ -867,17 +886,18 @@ class SliceViewWidget(QWidget):
                     c = self._to_px(0.0, 0.0)
                     if g.kind == "cylinder":
                         self._draw_voxels_round(p, g, d, k, c, None)
-                    p.drawEllipse(c, r / self.scale, r / self.scale)
-                    label_at = QPointF(c.x() - r / self.scale, c.y() - r / self.scale)
-                    handles = {"grid_r": QPointF(c.x() + r / self.scale, c.y())}
+                    rp = _px(r / self.scale)
+                    p.drawEllipse(c, rp, rp)
+                    label_at = _pt(QPointF(c.x() - rp, c.y() - rp))
+                    handles = {"grid_r": _pt(QPointF(c.x() + rp, c.y()))}
             elif abs(d) < r:
-                half = math.sqrt(r * r - d * d)
+                half = _half_chord(r, d)
                 lo = np.zeros(3)
                 hi = np.zeros(3)
                 lo[:2], hi[:2] = -half, half
                 lo[2], hi[2] = reg.zlo, reg.zhi
-                q0 = self._to_px(lo[iu], lo[iv])
-                q1 = self._to_px(hi[iu], hi[iv])
+                q0 = _pt(self._to_px(lo[iu], lo[iv]))
+                q1 = _pt(self._to_px(hi[iu], hi[iv]))
                 rect = QRectF(q0, q1).normalized()
                 if g.kind == "cylinder":
                     self._draw_voxels_round(p, g, d, k, self._to_px(0.0, 0.0), rect)
@@ -888,7 +908,7 @@ class SliceViewWidget(QWidget):
                            "grid_zhi": QPointF(rect.center().x(), rect.top())}
         elif reg.kind == "sphere":
             if abs(d) < reg.radius:
-                r = math.sqrt(reg.radius ** 2 - d * d) / self.scale
+                r = _px(_half_chord(reg.radius, d) / self.scale)
                 c = self._to_px(0.0, 0.0)
                 if g.kind == "sphere":
                     self._draw_voxels_round(p, g, d, k, c, None)

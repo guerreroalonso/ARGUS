@@ -25,6 +25,8 @@ class Diagnostic:
     line: int | None = None  # 0-based
     code: int | None = None  # IRETRN equivalente, si existe
     fortran_reason: str | None = None  # texto REASON de PENGEOM/penhmain
+    at_end: bool = False  # se ve al acabar de leer el fichero (falta END): va detrás de los de cualquier línea
+    ichpar: int | None = None  # .geo: el índice PARINP de la línea de un parámetro no reconocido (GEOMIN lo mira antes)
 
     def location(self) -> str:
         where = self.file or ""

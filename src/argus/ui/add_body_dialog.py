@@ -506,6 +506,12 @@ class AddBodyDialog(QDialog):
         module, cont, parinp = self.is_module(), self.container(), self.session.parinp
         return lambda doc, g: ge.add_primitive(doc, g, prim, material, cont, name, parinp=parinp, module=module)
 
+    def done(self, r: int) -> None:
+        # Cerrado (Aceptar, Cancelar o Esc): la comprobación que quedaba pendiente ya no es de nadie; si saltara
+        # después, miraría los cuerpos de entonces en la geometría de ahora (décima revisión).
+        self._timer.stop()
+        super().done(r)
+
     def accept(self) -> None:
         self._timer.stop()
         self._check()

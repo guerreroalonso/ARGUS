@@ -164,11 +164,40 @@ class Camera:
         self.yaw = (self.yaw + dyaw + 180.0) % 360.0 - 180.0
         self.pitch = max(-89.9, min(89.9, self.pitch + dpitch))
 
-    def pan(self, dx_px: float, dy_px: float, height: int) -> None:
-        """Desplaza el objetivo como si se arrastrara la imagen ``dx, dy`` píxeles."""
+    def orbit_about(self, pivot, dyaw: float, dpitch: float) -> None:
+        """Gira como :meth:`orbit`, pero alrededor de ``pivot`` (el punto que se ha cogido con el ratón): ese punto se
+        queda en su píxel y lo de alrededor gira en torno a él. Alrededor del objetivo, algo pequeño lejos de él (más
+        cerca o más lejos de la cámara) se salía de la imagen al menor giro (0.17.1)."""
+        old = np.column_stack(self.basis())
+        self.orbit(dyaw, dpitch)
+        rot = np.column_stack(self.basis()) @ old.T  # lleva la orientación de antes a la de ahora
+        p = np.asarray(pivot, dtype=float)
+        self.target = p + rot @ (np.asarray(self.target, dtype=float) - p)
+
+    def depth_of(self, point) -> float:
+        """Distancia de ``point`` a la cámara a lo largo de la vista (> 0 delante)."""
+        return float((np.asarray(point, dtype=float) - self.position) @ self.basis()[2])
+
+    def pan(self, dx_px: float, dy_px: float, height: int, depth: float | None = None) -> None:
+        """Desplaza la cámara como si se arrastrara la imagen ``dx, dy`` píxeles. Con ``depth`` (perspectiva), lo que
+        está a esa distancia sigue al ratón exactamente (el punto que se ha cogido); sin él, el plano del objetivo."""
         right, up, _ = self.basis()
-        per_px = 2.0 * self.half_height() / max(height, 1)
+        d = self.distance if (self.ortho or depth is None or depth <= 0.0) else float(depth)
+        per_px = 2.0 * d * self.tan_half() / max(height, 1)
         self.target = np.asarray(self.target, dtype=float) - right * dx_px * per_px + up * dy_px * per_px
+
+    def dolly_toward(self, point, factor: float) -> None:
+        """Acerca (``factor`` < 1) o aleja la cámara hacia ``point`` a lo largo de la recta que los une: ``point``
+        sigue en el mismo píxel y queda a ``factor`` veces la distancia de antes. El objetivo pasa a estar a su
+        profundidad: girar y desplazar después van a la escala de lo que se mira (perspectiva)."""
+        p = np.asarray(point, dtype=float)
+        new_pos = p + (self.position - p) * float(factor)
+        fwd = self.basis()[2]
+        depth = float((p - new_pos) @ fwd)
+        if depth <= 1e-12:
+            return
+        self.distance = max(1e-9, depth)
+        self.target = new_pos + fwd * self.distance
 
     def zoom(self, factor: float) -> None:
         self.distance = max(1e-9, self.distance * factor)

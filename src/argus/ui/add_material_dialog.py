@@ -437,9 +437,12 @@ class MaterialDialog(QDialog):
         # De dónde sale la composición.
         if self.mode() == LIST:
             if item is not None:
+                builtin = (" La lista es la que trae ARGUS (no se ha encontrado la de su penhan): para generarlo hará "
+                           "falta la carpeta de penhan (Opciones → Programas de penhan…)."
+                           if getattr(self.mlist, "builtin", False) else "")
                 self.list_state.setText(_span(html.escape(
                     f"✔ n.º {item[0]} de la lista de PENELOPE: {item[1]}. penhmat lo genera con su composición, su "
-                    "densidad y su energía media de excitación (opción 2, con ese número)."), OK_COLOR))
+                    f"densidad y su energía media de excitación (opción 2, con ese número).{builtin}"), OK_COLOR))
             elif not self.mlist:
                 self.list_state.setText(_span(html.escape(
                     "No se encuentra la lista de materiales de PENELOPE (database/material-list.txt; Opciones → "

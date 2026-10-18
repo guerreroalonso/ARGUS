@@ -42,9 +42,9 @@ from .materials import (
     find_material_list,
     hadron_data_needed,
     listed_number,
-    load_material_list,
     mat_filename_problem,
     match_material,
+    material_list_or_builtin,
     materials_table,
     read_mat_header,
     read_mat_nuclear,
@@ -134,7 +134,7 @@ def material_list(database: str | os.PathLike | None, folder: str | os.PathLike 
     path = Path(database) / "material-list.txt" if database else None
     if path is None or not path.is_file():
         path = find_material_list(folder)
-    return load_material_list(path) if path is not None else []
+    return material_list_or_builtin(path)
 
 
 def plan_materials(doc: InDocument, geo, folder: str | os.PathLike, database: str | os.PathLike | None = None,

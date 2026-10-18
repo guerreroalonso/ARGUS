@@ -437,6 +437,11 @@ def _problem(s: Series, text: str) -> None:
 
 def _consistent(s: Series, rows: int, cols: int, ps, iop, thickness) -> bool:
     """Todos los cortes de la serie tienen que tener el mismo tamaño, píxel y orientación."""
+    # 0,1 µm (un micro-TAC llega a 1 µm): menos no es un TAC, es un fichero dañado o mal anonimizado (con 0, el
+    # recorte y la rejilla salían infinitos; décima revisión).
+    if not (ps[0] > 1e-4 and ps[1] > 1e-4):
+        _problem(s, "El tamaño de píxel (PixelSpacing) de algunos cortes no es válido.")
+        return False
     if not s.slices and s.rows == 0:
         s.rows, s.cols = rows, cols
         s.pixel_spacing = (float(ps[0]), float(ps[1]))

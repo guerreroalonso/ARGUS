@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 
 from ..core.numfmt import fmt_count, fmt_int, fmt_num, plural
 from ..penhan import sections as sc
+from ..penhan.batch import MAX_SEED_PAIR
 from ..penhan.dumpfile import read_dump, source_differences, tally_differences, tally_diffs
 from .sim_widgets import (
     MAX_TIME,
@@ -40,6 +41,9 @@ from .sim_widgets import (
 from .source_panel import EnergyEdit, NumberEdit, format_energy
 
 PARTICLES = [(1, "e−"), (2, "γ"), (3, "e+"), (4, "p"), (5, "α"), (6, "n")]
+# Semillas de RANECU (rita.f, FUNCTION RAND): de 1 a sus módulos menos 1. Pares precalculados de RAND0: 1001.
+SEED1_MAX = 2147483562
+SEED2_MAX = 2147483398
 PARTICLE_NAMES = {1: "electrones", 2: "fotones", 3: "positrones", 4: "protones", 5: "alfas", 6: "neutrones"}
 IDCUT_TEXT = {0: "se absorben al entrar (IDCUT 0)", 1: "siguen su camino (IDCUT 1)",
               2: "siguen y se registra su fluencia (IDCUT 2)"}
@@ -852,17 +856,22 @@ class JobSection(Section):
         super().__init__(parent)
         f = QFormLayout(self)
         f.setContentsMargins(4, 2, 4, 4)
-        self.nsimsh = NumberEdit(minimum=0.0, width=90, tooltip="NSIMSH: partículas primarias que se simulan (cada "
-                                                                "una con su lluvia de secundarias; con una fuente "
-                                                                "radiactiva, desintegraciones). Vacío: 2e9")
+        self.nsimsh = NumberEdit(minimum=0.0, width=90, allow_empty=True,
+                                 tooltip="NSIMSH: partículas primarias que se simulan (cada una con su lluvia de "
+                                         "secundarias; con una fuente radiactiva, desintegraciones). Vacío: 2e9")
         self.nsimsh.valueEdited.connect(lambda v: self.edit("Número de partículas", lambda d: sc.set_value(
             d, "NSIMSH", [v])))
+        # Vacío, sin la línea (lo que dice la ayuda; antes no se podía vaciar: décima revisión).
+        self.nsimsh.cleared.connect(lambda: self.edit("Número de partículas",
+                                                      lambda d: sc.set_value(d, "NSIMSH", None)))
         f.addRow("Partículas:", row(self.nsimsh, "(NSIMSH)"))
-        self.time = DurationEdit(maximum=MAX_TIME, tooltip="TIME: tiempo máximo de simulación, en la unidad elegida "
-                                                           "(en el .in, en segundos; como mucho 10⁹ s, unos 31,7 "
-                                                           "años). Vacío: sin límite (penhmain toma 2e9 s)")
+        self.time = DurationEdit(maximum=MAX_TIME, allow_empty=True,
+                                 tooltip="TIME: tiempo máximo de simulación, en la unidad elegida (en el .in, en "
+                                         "segundos; como mucho 10⁹ s, unos 31,7 años). Vacío: sin límite (penhmain "
+                                         "toma 2e9 s)")
         self.time.secondsEdited.connect(lambda v: self.edit("Tiempo de simulación", lambda d: sc.set_value(
             d, "TIME", [v])))
+        self.time.cleared.connect(lambda: self.edit("Tiempo de simulación", lambda d: sc.set_value(d, "TIME", None)))
         self.time_text = QLabel()
         self.time_text.setStyleSheet("color: #666;")
         self.time.unit.currentIndexChanged.connect(lambda _i: self.refresh())
@@ -871,8 +880,12 @@ class JobSection(Section):
         self.seed_kind.addItem("semillas", "seeds")
         self.seed_kind.addItem("par precalculado n.º", "pair")
         self.seed_kind.activated.connect(self._on_seed_kind)
-        self.s1 = NumberEdit(width=90)
-        self.s2 = NumberEdit(width=90)
+        # Las del generador de PENELOPE (RANECU: de 1 a m − 1 con sus módulos) o el número del par precalculado (de 1 a
+        # 1001): una semilla que no cabe en un entero de 4 bytes dejaba el .in ilegible para penhmain (décima
+        # revisión); se dice en el campo, como con el tiempo de más.
+        self.s1 = NumberEdit(width=90, minimum=1.0, maximum=float(SEED1_MAX))
+        self.s2 = NumberEdit(width=90, minimum=1.0, maximum=float(SEED2_MAX))
+        self.s2.setToolTip(f"Segunda semilla (de 1 a {SEED2_MAX})")
         self.s1.format = lambda x: str(int(x))  # type: ignore[method-assign]
         self.s2.format = lambda x: str(int(x))  # type: ignore[method-assign]
         self.s1.valueEdited.connect(lambda v: self._on_seeds())
@@ -890,27 +903,19 @@ class JobSection(Section):
         self.dumpto_state = hint("")
         self.dumpto_state.setTextFormat(Qt.TextFormat.RichText)
         f.addRow(self.dumpto_state)
-        self.dumpp = NumberEdit(minimum=0.0, width=90, tooltip="DUMPP: escribe el volcado y los resultados cada "
-                                                                "DUMPP segundos (de 30 s a un día; 0 o vacío: sin "
-                                                                "DUMPP)")
+        self.dumpp = NumberEdit(minimum=0.0, width=90, allow_empty=True,
+                                tooltip="DUMPP: escribe el volcado y los resultados cada DUMPP segundos (de 30 s a un "
+                                        "día; 0 o vacío: sin DUMPP)")
         # 0: sin la línea (con DUMPP 0, penhmain volcaría cada 30 s, lo contrario de lo que se quiere decir).
         self.dumpp.valueEdited.connect(lambda v: self.edit("Periodo de volcado", lambda d: sc.set_value(
             d, "DUMPP", [v] if v > 0 else None)))
+        self.dumpp.cleared.connect(lambda: self.edit("Periodo de volcado", lambda d: sc.set_value(d, "DUMPP", None)))
         self.dumpp_text = QLabel()
         self.dumpp_text.setStyleSheet("color: #666;")
         f.addRow("Cada:", row(self.dumpp, "s (DUMPP)", self.dumpp_text))
-        # 0: sin LTRACK. penhmain guarda como mucho NPSHOW = 50 lluvias (NPSHOW = MIN(LTRACK, 50)).
-        self.ltrack = BinsEdit(maximum=50, allow_log=False, minimum=0, strict_max=False)
-        self.ltrack.valueEdited.connect(lambda n: self.edit("Lluvias para visualizar",
-                                                            lambda d: sc.set_value(d, "LTRACK", [n] if n else None)))
-        self.ltrack.setToolTip("LTRACK: penhmain escribe en los ficheros .trk de esta misma simulación (electron.trk, "
-                               "photon.trk…) las trayectorias de sus primeras LTRACK + 1 lluvias (mira si ha pasado "
-                               "de NPSHOW = MIN(LTRACK, 50) después de cada una, así que escribe también la "
-                               "siguiente), para verlas sobre la geometría en la ventana de resultados: como mucho 51, "
-                               "un límite fijo de penhmain. Para ver más, en 3D y animadas, está la cascada "
-                               "(«Lluvias» al ejecutar), que se simula aparte en tandas de 50.")
-        f.addRow("Trayectorias:", row(self.ltrack, "primeras lluvias de esta simulación, en sus .trk (LTRACK; "
-                                                   "penhmain escribe una más: como mucho 51)"))
+        # Las lluvias para verlas en 3D se eligen al ejecutar («Lluvias», de 1 a 1000): ARGUS las simula con el
+        # penhmain del usuario. LTRACK (las trayectorias en los .trk de la propia simulación, como mucho 51) ya no se
+        # enseña aparte, que eran dos números para lo mismo (Rafael, 18-10-2026); si el .in lo trae, se respeta.
         self.form = f
 
     def refresh(self) -> None:
@@ -937,14 +942,16 @@ class JobSection(Section):
         self.s1.set_value(float(-s1 if pair else s1))
         self.s2.set_value(float(s2))
         self.s2.setVisible(not pair)
+        self.s1._max = float(MAX_SEED_PAIR if pair else SEED1_MAX)
+        self.s1._tooltip = (f"Número del par de semillas precalculado de penhmain (RSEED −n: de 1 a {MAX_SEED_PAIR})"
+                            if pair else f"Primera semilla (de 1 a {SEED1_MAX})")
+        self.s1.setToolTip(self.s1._tooltip)
         self.resume.set_name(sc.text(doc, "RESUME") or "")
         self.dumpto.set_name(sc.text(doc, "DUMPTO") or "")
         v = sc.value(doc, "DUMPP")
         self.dumpp.set_value(v[0] if v else None)
         self.dumpp.setPlaceholderText("no")
         self.dumpp_text.setText(_dump_period_text(doc))
-        v = sc.value(doc, "LTRACK")
-        self.ltrack.set_value(int(v[0]) if v else 0)
         self.resume_state.setText(self._dump_state(sc.text(doc, "RESUME"), resume=True))
         self.dumpto_state.setText(self._dump_state(sc.text(doc, "DUMPTO"), resume=False))
 
@@ -979,7 +986,7 @@ class JobSection(Section):
         seeds = sc.seeds(self.doc)
         s1, s2 = seeds[-1] if seeds else (1, 1)
         if self.seed_kind.currentData() == "pair":
-            new = (-max(abs(s1) if abs(s1) <= 1001 else 1, 1), 1)
+            new = (-max(abs(s1) if abs(s1) <= MAX_SEED_PAIR else 1, 1), 1)
         else:
             new = (1, 1) if s1 < 0 else (s1, s2)
         self.edit("Semillas", lambda d: sc.set_seeds(d, [new]))

@@ -314,12 +314,19 @@ def test_discrete_lines_are_not_a_density(qtbot):
     assert res["area"] == pytest.approx(1.0) and res["emean"] == pytest.approx(3.52e5)
 
 
-def test_ltrack_field_stops_at_penhmain_limit(qtbot):
+def test_the_job_section_has_no_ltrack_field(qtbot):
+    """El campo de LTRACK paraba en 50 (lo que guarda penhmain). Desde 0.17.1 no está: eran dos números para lo mismo
+    («Trayectorias» y «Lluvias»); las lluvias para verlas en 3D se eligen al ejecutar, de 1 a 1000. Los avisos de una
+    línea LTRACK del .in siguen yendo a «Trabajo»."""
     from argus.ui.sim_outputs import JobSection
 
     p = JobSection()
     qtbot.addWidget(p)
-    assert p.ltrack.spin.maximum() == 50
+    assert not hasattr(p, "ltrack") and "LTRACK" in p.keywords
+    f = p.form
+    labels = [f.itemAt(i, f.ItemRole.LabelRole).widget().text() for i in range(f.rowCount())
+              if f.itemAt(i, f.ItemRole.LabelRole) is not None]
+    assert labels[:2] == ["Partículas:", "Tiempo máx.:"] and "Trayectorias:" not in labels
 
 
 # -- Qt ----------------------------------------------------------------------------------------------------------------

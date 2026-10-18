@@ -87,7 +87,7 @@ def element_z(token: str) -> int | None:
     t = token.strip()
     if not t:
         return None
-    if t.isdigit():
+    if t.isascii() and t.isdigit():
         z = int(t)
         return z if 1 <= z <= 99 else None
     if t in _SYMBOL_Z:
@@ -107,15 +107,18 @@ def ascii_name(text: str, width: int = NAME_WIDTH) -> str:
 # ---------------------------------------------------------------------------------------------------------------------
 
 class _FormulaParser:
+    MAX_DEPTH = 50  # paréntesis anidados (ninguna fórmula química tiene tantos)
+
     def __init__(self, text: str):
         self.s = text
         self.i = 0
+        self.depth = 0
 
     def error(self, what: str) -> ValueError:
         return ValueError(f"{what} (en «{self.s}», posición {self.i + 1})")
 
     def number(self) -> float | None:
-        m = re.compile(r"\d+(?:\.\d+)?").match(self.s, self.i)
+        m = re.compile(r"[0-9]+(?:\.[0-9]+)?").match(self.s, self.i)
         if m is None:
             return None
         self.i = m.end()
@@ -129,14 +132,18 @@ class _FormulaParser:
                 return out
             if c in "([":
                 self.i += 1
+                self.depth += 1
+                if self.depth > self.MAX_DEPTH:
+                    raise self.error("demasiados paréntesis anidados")
                 inner = self.groups(")" if c == "(" else "]")
+                self.depth -= 1
                 if self.i >= len(self.s):
                     raise self.error("falta cerrar un paréntesis")
                 self.i += 1
                 k = self.number()
                 for z, n in inner.items():
                     out[z] = out.get(z, 0.0) + n * (1.0 if k is None else k)
-            elif c.isupper():
+            elif "A" <= c <= "Z":
                 m = re.compile(r"[A-Z][a-z]?").match(self.s, self.i)
                 sym = m.group(0)
                 if sym not in _SYMBOL_Z:
