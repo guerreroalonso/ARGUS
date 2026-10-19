@@ -69,8 +69,10 @@ def value(doc: InDocument, keyword: str) -> list | None:
 
 
 def text(doc: InDocument, keyword: str) -> str | None:
+    """El nombre de la (primera) línea de ``keyword`` sin los espacios de los lados, para enseñarlo. penhmain abre el
+    nombre con los del principio (``resume.open_name``)."""
     ln = doc.first(kw6(keyword))
-    return ln.text.strip(" ") if ln is not None else None  # como penhmain: solo los blancos
+    return ln.text.strip(" ") if ln is not None else None
 
 
 def set_value(doc: InDocument, keyword: str, values: list | None) -> None:
@@ -93,7 +95,9 @@ def set_text(doc: InDocument, keyword: str, name: str | None) -> None:
         doc.remove(kw6(keyword))
         return
     ln = doc.first(kw6(keyword))
-    if ln is not None and not ln.error and (ln.text or "").strip() == name.strip():
+    # Con los blancos del principio, que penhmain conserva: escribir el nombre sin ellos arregla la línea (duodécima
+    # revisión: «RESUME  dump.dmp» se quedaba igual).
+    if ln is not None and not ln.error and (ln.text or "").rstrip(" ") == name.strip():
         return
     doc.set(kw6(keyword), text=name.strip())
 
@@ -576,8 +580,12 @@ def bins_for_voxel(lo: float, hi: float, size: float, max_bins: int, odd: bool =
     if not (length > 0) or not math.isfinite(length):
         raise ValueError("El eje de la rejilla no tiene longitud.")
     ratio = length / size
-    n = max(1, int(round(ratio))) if math.isfinite(ratio) and ratio <= 10 * max_bins else max_bins + 1
-    if odd and n % 2 == 0:
+    # Muchos más intervalos de los que caben (o un cociente que no es un número): como cualquier otro «demasiados»,
+    # se dejan los extremos y se avisa. (Antes, max_bins + 1 pasaba por el ajuste a impar y quedaba en max_bins:
+    # la caja encogía a max_bins·Δ sin avisar.)
+    too_many = not (math.isfinite(ratio) and ratio <= 10 * max_bins)
+    n = max_bins + 1 if too_many else max(1, int(round(ratio)))
+    if odd and n % 2 == 0 and not too_many:
         n = n + 1 if n + 1 <= max_bins else n - 1
     if n > max_bins:
         n = max_bins if not odd or max_bins % 2 else max_bins - 1
@@ -624,11 +632,14 @@ def stretch_axis(lo: float, hi: float, n: int, value: float, end: str, max_bins:
         else:
             b = max(value, a + gap)
         return _nice6(a), _nice6(b), max(n, 1)
+    # Al menos los vóxeles que hacen falta para que el eje mida lo que pide penhmain (con vóxeles de menos de 1e-6 cm,
+    # uno solo no basta: 3102/3104/3106; antes, set_dose_grid lo rechazaba a mitad del arrastre).
+    m_min = max(1, math.ceil(1.0001 * GRID_MIN_LENGTH / d))
     if end == "lo":
-        m = int(min(max(round((b - value) / d), 1), max_bins))
+        m = int(min(max(round((b - value) / d), m_min), max_bins))
         a = b - m * d
     else:
-        m = int(min(max(round((value - a) / d), 1), max_bins))
+        m = int(min(max(round((value - a) / d), m_min), max_bins))
         b = a + m * d
     return _nice6(a), _nice6(b), m
 
@@ -641,7 +652,8 @@ def stretch_radius(r: float, n: int, value: float, max_bins: int = 101, keep_vox
     d = r / n if n >= 1 else 0.0
     if not keep_voxel or not (d > 0) or not math.isfinite(d):
         return _nice6(max(value, 10 * GRID_MIN_LENGTH * max(n, 1), 1e-9 * max(r, 1.0))), max(n, 1)
-    m = int(min(max(round(value / d), 1), max_bins))
+    m_min = max(1, math.ceil(1.0001 * GRID_MIN_LENGTH / d))  # RU ≥ 1e-6 cm (3108), como en stretch_axis
+    m = int(min(max(round(value / d), m_min), max_bins))
     return _nice6(m * d), m
 
 

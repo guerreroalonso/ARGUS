@@ -172,7 +172,15 @@ def dump_text(title="Title of the job, up to 65 characters.", showers=1.0e6, nse
     if complete:
         lines += [row([0.0] * 7) + "           0           0"]
         lines += [row([0.0] * n) for n in (3, 3, 18, 18, 2, 2, 2, 2, 2, 2, 24, 24, 3, 3)]
-        lines += [f"  {nbody:10d}", "   (resto del volcado)", "", "   *** END ***"]
+        lines += [f"  {nbody:10d}"] + [row([0.0] * nbody)] * 4  # NBODY, TDEBO, TDEBO2, TCHBO, TCHBO2
+        # HENAND (NBE 0 1e7 2 y NBANGL 2 1, por ejemplo) y ningún detector ni rejilla (duodécima revisión: antes,
+        # «(resto del volcado)», que penhmain no podría leer).
+        lines += ["           2   0.0000000000000000        10000000.000000000        5000000.0000000000     "
+                  "   2.0000000000000002E-007           0", row([0.0] * 24), row([0.0] * 24),
+                  "           2   0.0000000000000000        180.00000000000000        90.000000000000000     "
+                  "   1.1111111111111112E-002           1   360.00000000000000        2.7777777777777779E-003"
+                  "           0"] + [row([0.0] * 12)] * 5
+        lines += ["           0           0           0 F F F", "", "   *** END ***"]
     return "\n".join(lines) + "\n"
 
 
@@ -184,7 +192,11 @@ def test_parse_dump_header():
     assert parse_dump_text("Empty file. Initialisation of MultiRuns.\n").state == "empty"
     assert parse_dump_text("").state == "empty"
     assert parse_dump_text(dump_text(complete=False)).problem == "truncated"
-    assert parse_dump_text(dump_text().replace("   *** END ***", "")).problem == "truncated"
+    # Sin «*** END ***» (penhmain no lee esa línea), vale si están todos los datos (duodécima revisión); si no, no.
+    whole = parse_dump_text(dump_text().replace("   *** END ***", ""))
+    assert whole.usable and whole.no_end
+    cut = dump_text().replace("   *** END ***", "").split("\n")
+    assert parse_dump_text("\n".join(cut[:-6])).problem == "truncated"
     assert parse_dump_text(dump_text().replace("   1234567", "   abc")).problem == "format"
     assert parse_dump_text("  1.0  2.0  3.0\n").state == "corrupt"
 
@@ -221,10 +233,16 @@ def test_resume_states(case):
     (folder / "dump1.dmp").write_text(dump_text(title=title).replace("   1234567", "   abc"))
     assert resume_messages()[0].code == 3113
     # Volcado válido de esta simulación pero con otro espectro: penhmain no lo comprueba.
+    (folder / "dump1.dmp").write_text(dump_text(title=title, showers=1000.0))
+    m = resume_messages()[0]
+    assert m.severity == Severity.WARNING and "continuará" in m.message and "espectro" in m.message
+    assert read_dump(folder / "dump1.dmp").usable
+    # Ya con las lluvias de NSIMSH: no simula más (y no mezcla nada) y reescribe con el tiempo a 0 (duodécima
+    # revisión: decía «solo volverá a escribir los mismos resultados» y, a la vez, que mezclaría las simulaciones).
     (folder / "dump1.dmp").write_text(dump_text(title=title))
     m = resume_messages()[0]
-    assert m.severity == Severity.WARNING and "no simulará ninguna más" in m.message and "espectro" in m.message
-    assert read_dump(folder / "dump1.dmp").usable
+    assert m.severity == Severity.WARNING and "no simulará ninguna más" in m.message
+    assert "tiempo de cálculo a 0" in m.message and "mezclaría" not in m.message
 
 
 # ---------------------------------------------------------------------------

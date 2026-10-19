@@ -16,9 +16,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..core.diagnostics import DiagnosticList
-from ..core.numfmt import fmt_count, fmt_energy, fmt_num
+from ..core.numfmt import fmt_count, fmt_energy, fmt_int, fmt_num
 from . import sections as sc
-from .dumpfile import read_dump, source_differences, tally_differences
+from .dumpfile import read_dump, source_differences
 from .inputfile import InDocument, resolve_body_ref
 from .listdirected import ListReadError, read_list, read_pairs
 
@@ -947,7 +947,7 @@ def _job(c: _Ctx) -> None:
     if ln is not None and float(ln.values[0]) < 1.0e10:
         v = float(ln.values[0])
         if v < 30.0:
-            c.info("DUMPP: el periodo mínimo es 30 s (penhmain usa 30).", ln)
+            c.info("DUMPP: el periodo mínimo es 30 s (penhmain usa 30 s).", ln)
         elif v > 86400.0:
             c.info("DUMPP: el periodo máximo es un día (penhmain usa 86400 s).", ln)
         if doc.first("DUMPTO") is None:
@@ -968,7 +968,7 @@ def _job(c: _Ctx) -> None:
         if s1 < 0 and -s1 > 1001:
             c.warn(f"RSEED {s1}: penhmain solo tiene 1001 pares de semillas precalculados; con ese número usa 1, 1.",
                    ln)
-        elif s1 == 0 or s2 <= 0:
+        elif s1 == 0 or (s1 > 0 and s2 <= 0):  # con −N, la segunda no cuenta (RAND0 pone las dos: penhmain.f 4267)
             c.warn("RSEED: las semillas deben ser enteros positivos (un primero negativo, −N, elige el par "
                    "precalculado N).", ln)
     _resume(c)
@@ -976,58 +976,61 @@ def _job(c: _Ctx) -> None:
 
 
 def _resume(c: _Ctx) -> None:
+    """RESUME: lo que hará penhmain con el volcado (``resume.resume_outcome``, lo mismo que dicen «Ejecutar» y
+    «Trabajo»)."""
+    from . import resume as rs
+
     doc = c.doc
     ln = doc.first("RESUME")
-    name = sc.text(doc, "RESUME")
-    if ln is None or not name or c.folder is None:
+    out = rs.resume_outcome(doc, c.folder, c.geo)
+    if ln is None or out is None:
         return
-    info = read_dump(c.folder / name)
-    if info.state == "missing":
-        c.info(f"RESUME: no existe {name}; penhmain lo crea (con el texto «Empty.») y empieza desde cero.", ln)
+    name = out.shown
+    if out.blank and out.action == rs.FRESH:
+        return  # el aviso del nombre con un blanco delante (``validate``) ya dice que empieza desde cero
+    shown = f"«{out.name}» (con el blanco del principio)" if out.blank else name
+    if out.action == rs.FRESH:
+        if out.why == "no existe":
+            c.info(f"RESUME: no existe {shown}; {out.detail}.", ln)
+        else:
+            c.info(f"RESUME: {shown} {out.detail}.", ln)
         return
-    if info.state == "empty":
-        c.info(f"RESUME: {name} no contiene una simulación guardada ({info.message}); penhmain empieza desde cero.",
-               ln)
+    if out.action == rs.DESTROY:
+        c.err(f"RESUME: {shown} {out.why}: {out.detail}. Ponga en RESUME el nombre del volcado.", ln)
         return
-    if info.state == "corrupt":
-        c.err(f"RESUME: {name} no es un volcado de penhmain ({info.message}): penhmain se detendría con un error "
-              "de lectura.", ln)
+    if out.action == rs.STOP:
+        if out.code == 3112:
+            c.err(f"RESUME: el volcado {shown} es de otra simulación ({out.detail}): penhmain se detendría.", ln,
+                  out.code, out.reason)
+        elif out.code is not None:  # (el código va aparte: «[IRETRN 3113]»)
+            c.err(f"RESUME: {shown} {out.why}. {out.detail}.", ln, out.code, out.reason)
+        elif out.info is not None and getattr(out.info, "problem", None) is not None:
+            c.err(f"RESUME: {shown} {out.why}. {out.detail}.", ln)
+        else:
+            c.err(f"RESUME: {shown} {out.why}: {out.detail}.", ln)
         return
-    title = doc.model.title[:65].rstrip()
-    if info.title != title:
-        c.err(f"RESUME: el volcado {name} es de otra simulación (su título es «{info.title}» y el del .in "
-              f"«{title}»): penhmain se detendría.", ln, 3112,
-              "The dump file is corrupted (the TITLE does not match).")
-        return
-    if info.problem == "format":
-        c.err(f"RESUME: {name} está dañado. {info.message}", ln, 3113, "The dump file is empty or corrupted.")
-        return
-    if info.problem == "truncated":
-        c.err(f"RESUME: {name} está incompleto. {info.message} penhmain se detendría con un error de lectura "
-              "(End of file).", ln)
-        return
-    dshn = float(sc.value(doc, "NSIMSH")[0]) if doc.first("NSIMSH") is not None else 2.0e9
-    if dshn < 1.0:
-        dshn = 2.0e9
-    msg = (f"RESUME: penhmain continuará la simulación guardada en {name} ({_count(info.showers)} partículas ya "
-           "simuladas)")
-    if info.showers > dshn - 0.5:
-        msg += (f" y, como NSIMSH = {_count(dshn)}, no simulará ninguna más: solo volverá a escribir los mismos "
-                "resultados")
-    diffs = source_differences(info, doc, c.geo)
-    if diffs:
-        msg += (". Pero el volcado no se hizo con este .in (" + "; ".join(diffs) + "): penhmain solo compara el "
-                "título y mezclaría las dos simulaciones")
-        c.warn(msg + ".", ln)
+    if out.action == rs.DONE:
+        more = " o, si quiere más, suba NSIMSH" if "NSIMSH" in out.why else ""
+        c.warn(f"RESUME: la simulación guardada en {shown} ya está terminada ({out.why}): penhmain no simulará "
+               "ninguna más; volverá a escribir los resultados y el volcado con el tiempo de cálculo a 0 (cuando no "
+               f"simula nada, no suma el de antes: para no perderlo, no ejecute{more}).", ln)
     else:
+        msg = f"RESUME: penhmain continuará la simulación guardada en {shown} ({rs.showers_note(out)})"
+        if out.diffs:
+            msg += ". Pero el volcado no se hizo con este .in: " + rs.diffs_text(out)
         c.warn(msg + ".", ln)
-    tallies = tally_differences(info, doc)
-    if tallies:
-        # HENANR, IMDETR, ANDETR, ENDETR y DOSER leen del volcado los intervalos y la rejilla (penhmain.f 4337-4351).
-        c.warn(f"RESUME: al reanudar, penhmain toma del volcado las rejillas y los intervalos de los resultados, no "
-               f"los del .in, y los de {name} son otros (" + "; ".join(tallies) + "). Los resultados seguirán con los "
-               "del volcado; para usar los del .in, empiece sin RESUME.", ln)
+    if out.tallies:
+        # HENANR, IMDETR, ANDETR, ENDETR y DOSER leen del volcado cómo se cuentan los resultados (penhmain.f
+        # 4337-4351): las rejillas, los intervalos, los detectores y los nombres de sus ficheros.
+        c.warn(f"RESUME: al reanudar, penhmain toma del volcado las rejillas, los intervalos y los detectores de los "
+               f"resultados (también los nombres de sus ficheros), no los del .in, y los de {name} son otros ("
+               + "; ".join(out.tallies) + "). Los resultados seguirán con los del volcado; para usar los del .in, "
+               "empiece sin RESUME.", ln)
+    if out.ltrack:
+        c.warn("RESUME: al reanudar, penhmain no escribe trayectorias (LTRACK solo cuenta en una simulación que "
+               "empieza desde cero): no habrá ficheros .trk.", doc.first("LTRACK"))
     _resume_ct(c, ln, name)
+    title = doc.model.title[:65].rstrip()
     if title == LAYOUT_TITLE:
         c.info("El título es el de la plantilla: penhmain solo compara el título para saber si un volcado es de "
                "esta simulación, así que conviene uno propio para cada caso.", doc.first("TITLE "))
@@ -1054,27 +1057,43 @@ def _resume_ct(c: _Ctx, ln, name: str) -> None:
 
 
 def _dumpto(c: _Ctx) -> None:
+    """DUMPTO (o el «dump.dmp» de penhmain sin DUMPTO): dónde escribirá el volcado y si se puede."""
+    from . import resume as rs
+
     doc = c.doc
     ln = doc.first("DUMPTO")
-    name = sc.text(doc, "DUMPTO")
-    if ln is not None and name:
-        why = _output_problem(c, name)
-        if why:
-            c.warn(f"DUMPTO: {why}; penhmain no podría escribir el volcado y se detendría con un error al hacer el "
-                   "primero.", ln)
-            return
-    if ln is None or not name or c.folder is None or name == sc.text(doc, "RESUME"):
+    target = rs.dump_target(doc, c.folder)
+    if target is None or c.folder is None:
         return
-    info = read_dump(c.folder / name)
+    name = target.shown
+    line = ln if target.explicit else (doc.first("DUMPP ") or doc.first("NSIMSH") or doc.first("TITLE "))
+    what = f"DUMPTO: '{name}'" if target.explicit else f"Sin DUMPTO, penhmain escribe el volcado en {name}, y {name}"
+    if target.problem:
+        if target.stops:
+            c.err(f"{what} {target.problem}; penhmain simularía y se detendría al escribir el primer volcado, sin "
+                  "escribir ningún resultado.", line)
+        else:
+            c.err(f"{what} {target.problem}. Elija otro nombre para el volcado"
+                  + ("." if target.explicit else " (DUMPTO)."), line)
+        return
+    res = rs.open_name(doc, "RESUME")
+    if not target.explicit or (res is not None and rs.rel_key(res) == rs.rel_key(target.name)):
+        return  # el «dump.dmp» de siempre, o el volcado que se sigue (lo dice RESUME)
+    info = read_dump(c.folder / target.name)
     if not info.usable:
         return
-    diffs = source_differences(info, doc, c.geo)
+    n = rs.count_text(info.showers, info.kparp == 0)
     title = doc.model.title[:65].rstrip()
     if info.title != title:
-        diffs.insert(0, "título")
+        c.info(f"El volcado {name} ({n}) no es de este .in (otro título): penhmain lo sustituirá al simular.", line)
+        return
+    diffs = source_differences(info, doc, c.geo)
     if diffs:
-        c.info(f"Los resultados que hay en la carpeta ({name}, {_count(info.showers)} partículas) no son de este .in ("
-               + "; ".join(diffs) + "); se sustituirán al volver a simular.", ln)
+        c.info(f"El volcado {name} ({n}) no se hizo con este .in (" + "; ".join(diffs) + "): penhmain lo sustituirá "
+               "al simular.", line)
+    else:
+        c.info(f"{name} tiene una simulación de este .in ({n}); sin RESUME, penhmain empieza desde cero y la "
+               f"sustituirá en el primer volcado (para seguirla, ponga RESUME {name}).", line)
 
 
 def _psf_input(c: _Ctx) -> None:
@@ -1111,10 +1130,62 @@ def _psf_input(c: _Ctx) -> None:
         elif _psf_empty(path):
             c.err(f"El fichero de espacio de fases '{name}' está vacío (quizá lo dejó así una simulación "
                   "anterior que no lo encontró): penhmain se detendría.", ln, 3117, "The file is empty or corrupted.")
-        elif _psf_kinds(path) & {4, 5}:
-            c.warn(f"El espacio de fases '{name}' tiene protones o alfas, pero con IPSFN penhmain no inicializa "
-                   "PENHAN (KPARP se queda en 1 y no llama a PHINIT): no carga sus secciones eficaces ni los "
-                   "ENDF, y esas partículas no se simularían bien.", ln)
+        else:
+            _psf_records(c, ln, name, path, first)
+            if _psf_kinds(path) & {4, 5}:
+                c.warn(f"El espacio de fases '{name}' tiene protones o alfas, pero con IPSFN penhmain no inicializa "
+                       "PENHAN (KPARP se queda en 1 y no llama a PHINIT): no carga sus secciones eficaces ni los "
+                       "ENDF, y esas partículas no se simularían bien.", ln)
+
+
+def _psf_records(c: _Ctx, ln, name: str, path: Path, first: bool) -> None:
+    """Las líneas que lee RDPSF (undécima revisión): los primeros 136 caracteres de cada una (``CHARACTER*136``) y,
+    de ellos, KPAR, E, X, Y, Z, U, V, W, WGHT, ILB(1:4) y NSHI; la que no se puede leer, la salta sin avisar. Si no
+    queda ninguna, el fichero es como uno vacío (3117 en el primero)."""
+    from .cascade import PSF_RECORD
+
+    readable, long_lines = _psf_scan(path)
+    width = f" (pasan de {PSF_RECORD} caracteres y penhmain solo lee los {PSF_RECORD} primeros)" if long_lines else ""
+    if readable is False:
+        text = f"Ninguna línea del espacio de fases '{name}' es una partícula que penhmain pueda leer{width}"
+        if first:
+            c.err(text + ": penhmain se detendría.", ln, 3117, "The file is empty or corrupted.")
+        else:
+            c.err(text + ": al acabar el anterior, penhmain lo saltará sin avisar; sus partículas no se simularán.",
+                  ln)
+    elif long_lines:
+        many = "1 línea" if long_lines == 1 else f"{fmt_int(long_lines)} líneas"
+        c.warn(f"{'Hay ' if long_lines == 1 else ''}{many} del espacio de fases '{name}' "
+               f"{'pasa' if long_lines == 1 else 'pasan'} de {PSF_RECORD} caracteres: penhmain solo lee los "
+               f"{PSF_RECORD} primeros de cada una (si así no se puede leer, la salta sin avisar).", ln)
+
+
+def _psf_scan(path, head: int = 1 << 16, cap: int = 1 << 28) -> tuple[bool | None, int]:
+    """(¿Lee RDPSF alguna partícula del fichero?, líneas de partículas de los primeros ``head`` bytes que pasan de
+    136 caracteres). Lo primero, None si no se sabe: en ``cap`` bytes no hay ninguna y el fichero sigue."""
+    from .cascade import PSF_RECORD, psf_record
+
+    readable: bool | None = False
+    long_lines = 0
+    seen = 0
+    try:
+        with open(path, "rb") as f:
+            for raw in f:
+                line = raw.decode("latin-1")
+                body = line.rstrip("\r\n")
+                if seen < head and len(body) > PSF_RECORD and not body.lstrip().startswith("#"):
+                    long_lines += 1
+                seen += len(raw)
+                if readable is False and psf_record(line) is not None:
+                    readable = True
+                if readable and seen >= head:
+                    break
+                if seen >= cap:
+                    readable = readable or None
+                    break
+    except OSError:
+        return None, 0
+    return readable, long_lines
 
 
 def _psf_kinds(path, limit: int = 1 << 16) -> set[int]:

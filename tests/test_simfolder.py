@@ -62,14 +62,16 @@ def test_everything_penhmain_needs_is_copied(case, tmp_path):
     assert names["pO16_ICRU63.endf"].source.parent == in_path.parent
     assert names["pO17_TENDL.endf"].source.parent == db / "ENDF_data"
     assert not plan.missing and not plan.conflicts
+    # El volcado de RESUME, que no está: sale en la lista, sin copiar (duodécima revisión: no salía).
+    assert names["dump1.dmp"].status == "missing" and "desde cero" in names["dump1.dmp"].note
     copied = execute(plan)
-    assert {p.name for p in copied} == set(names)
+    assert {p.name for p in copied} == set(names) - {"dump1.dmp"}
     assert (dest / "pO16_ICRU63.endf").read_text().endswith("(copia local)\n")
     assert os.access(dest / "penhmain.x", os.X_OK)
     assert "0 ya estaban" in summary(plan) or "copiados" in summary(plan)
     # Preparar otra vez: ya está todo (no se copia nada) y la carpeta propuesta pasa a ser otra.
     again = _plan(in_path, db, exe, dest)
-    assert not again.to_copy and len(again.by_status("same")) == len(again.items)
+    assert not again.to_copy and len(again.by_status("same")) == len(again.items) - 1  # (sin el volcado)
     assert default_destination(in_path).name == "maniqui_sim2"
 
 

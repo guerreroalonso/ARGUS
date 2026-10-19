@@ -497,7 +497,7 @@ class MainWindow(QMainWindow):
         self.act_results_open.triggered.connect(self.open_results_folder)
         self.act_outputs = QAction("&Elegir qué resultados pide el .in…", self)
         self.act_outputs.setToolTip("Dosis en 3D, espectros y fluencia en un cuerpo, espacio de fases, energía "
-                                    "depositada, trayectorias, seguir la simulación…: lo que calcula penhmain")
+                                    "depositada, seguir la simulación…: lo que calcula penhmain")
         self.act_outputs.triggered.connect(self.choose_outputs)
         self.act_parallel = QAction("Simulaciones en para&lelo…", self)
         self.act_parallel.setToolTip("El mismo .in en varias carpetas con semillas independientes (como MultiRuns): "
@@ -942,8 +942,41 @@ class MainWindow(QMainWindow):
         geo = self.session.geo if self.session is not None and self.session.ok else None
         m = ctrl.doc.model
         active = se.active_bodies(ctrl.doc, geo)
-        self.view.set_source(m.source, active, m.grids, editable=not m.source.from_psf)
-        self.view3d.set_source(m.source, active, m.grids, editable=not m.source.from_psf)
+        grids, grid_kw = m.grids, {}
+        dumped = self._resume_dose_grid()
+        if dumped is not None:
+            # penhmain seguirá con la del volcado (RESUME): esa se dibuja, sin asas (no se cambia desde el .in).
+            grids = dumped
+            grid_kw = {"grid_editable": False, "grid_label": "rejilla del volcado (RESUME), no la del .in"}
+        self.view.set_source(m.source, active, grids, editable=not m.source.from_psf, **grid_kw)
+        self.view3d.set_source(m.source, active, grids, editable=not m.source.from_psf, **grid_kw)
+
+    def _resume_dose_grid(self) -> dict | None:
+        """Con RESUME de un volcado que penhmain usará, la rejilla de dosis del volcado (como en ``doc.model.grids``)
+        si no es la del .in: penhmain toma la del volcado (undécima revisión: las vistas dibujaban y dejaban estirar
+        la del .in). None si no hay RESUME, el volcado no se usará o la rejilla es la misma."""
+        from ..penhan import resume as rs
+        from ..penhan.dumpfile import tally_diffs
+
+        ctrl = self.input
+        if ctrl is None or ctrl.folder is None:
+            return None
+        out = rs.resume_outcome(ctrl.doc, ctrl.folder)  # lo mismo que los mensajes (duodécima revisión)
+        if out is None or not out.follows or out.info.tallies is None:
+            return None
+        info = out.info
+        if not tally_diffs(info, ctrl.doc, ("grid",)):
+            return None
+        g = info.tallies.grid
+        out: dict = {}
+        if g is not None:
+            for k in ("x", "y", "z"):
+                v = getattr(g, k)
+                if v is not None:
+                    out["GRID" + k.upper()] = [float(v[0]), float(v[1]), int(v[2])]
+            if g.r is not None:
+                out["GRIDR"] = [float(g.r[0]), int(g.r[1])]
+        return out
 
     def _on_input_changed(self) -> None:
         self._sync_parinp()  # si han cambiado los PARINP, se recalcula la geometría
@@ -1717,7 +1750,12 @@ class MainWindow(QMainWindow):
     def _drag_edit(self, text: str, fn, finished: bool) -> None:
         if self.input is None:
             return
-        self.input.live(fn)
+        try:
+            self.input.live(fn)
+        except ValueError as exc:
+            # Lo que penhmain no aceptaría (set_dose_grid lo comprueba antes de escribir): esta posición no se
+            # aplica, el .in se queda con la última que valía y el arrastre sigue (o se cierra con ella).
+            self.statusBar().showMessage(str(exc), 8000)
         if finished:
             self.input.commit_live(text)
             # Al soltar, el corte aún se da por «arrastrando» y _on_input_changed no ha refrescado estos
@@ -3415,11 +3453,18 @@ class MainWindow(QMainWindow):
 
     def show_tracks_on_geometry(self, tracks) -> None:
         """Trayectorias de LTRACK (lista de Tracks) sobre los cortes 2D y en la vista 3D, o None para quitarlas."""
+        from ..core.numfmt import fmt_int
+
         self.view.set_tracks(tracks)
         self.view3d.set_tracks(tracks)
         if tracks:
             n = sum(t.count for t in tracks)
-            self.statusBar().showMessage(f"Trayectorias sobre la geometría: {n}", 8000)
+            note = getattr(tracks, "note", "")
+            points = sum(len(t.points) for t in tracks)
+            if not note and points > min(self.view.MAX_TRACK_POINTS, self.view3d.MAX_TRACK_POINTS):
+                note = "no caben todas: de cada tipo de partícula, las primeras"
+            self.statusBar().showMessage(f"Trayectorias sobre la geometría: {fmt_int(n)}"
+                                         + (f" ({note})" if note else ""), 15000 if note else 8000)
 
     def show_results_on_geometry(self, overlay) -> None:
         """Un mapa de la ventana de resultados (DoseOverlay) sobre los cortes, o None para quitarlo."""

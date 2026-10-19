@@ -99,7 +99,8 @@ def test_the_organ_of_a_body_is_the_bodies_with_its_description_and_material(adu
 
 def test_the_fitted_box_holds_every_point_of_the_body(adult):
     """Puntos al azar alrededor de cada trozo del pulmón: todos los que LOCATE sitúa en él caen dentro de la caja
-    (la caja exacta de cada cuerpo con el trazador, la que usa la ventana)."""
+    (la caja exacta de cada cuerpo, la que usa la ventana). (Desde 0.17.3, la de sus superficies y las de su módulo:
+    en este maniquí, que tiene solapes, algo mayor que lo que LOCATE le da; más puntos para tener los mismos.)"""
     from argus.pengeom.extent import element_extent
     from argus.pengeom.locate import Locator
     from argus.render.raytrace import RayTracer
@@ -112,7 +113,7 @@ def test_the_fitted_box_holds_every_point_of_the_body(adult):
         lo, hi = element_extent(geo, tracer, kb, adult.bounds)
         c, s = (np.asarray(v) for v in se.fitted_box(lo, hi))
         pad = 0.25 * (hi - lo) + 0.5
-        pts = rng.uniform(lo - pad, hi + pad, size=(40000, 3))
+        pts = rng.uniform(lo - pad, hi + pad, size=(120000, 3))
         inside = pts[loc.locate(pts)[0] == kb]
         assert len(inside) > 1000
         assert np.all(np.abs(inside - c) <= 0.5 * s), kb

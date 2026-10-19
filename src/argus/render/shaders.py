@@ -161,6 +161,19 @@ int locate(vec3 p, vec3 d, int ksF, int sdF, float band) {
     return uNBodys + 1;
 }
 
+// Desde fuera, como STEP de PENGEOM: solo se entra por la raíz, si el punto está dentro de sus superficies (LOCATE
+// no las mira: se entraba en lo que asoma de una hija del módulo raíz; undécima revisión).
+bool insideRoot(vec3 p, vec3 d, int ksF, int sdF, float band) {
+    ivec4 b = texelFetch(uBody, A(2 * uNBodys), 0);
+    for (int c = b.x; c < b.y; ++c) {
+        int v = texelFetch(uCons, A(c), 0).x;
+        int ks = v >> 2;
+        int sd = ks == ksF ? sdF : side(ks, p, d, band);
+        if (sd != (v & 3)) return false;
+    }
+    return true;
+}
+
 int memFind(int ks) {
     for (int m = 0; m < MEM; ++m) {
         if (memKs[m] == ks) return m;
@@ -291,7 +304,9 @@ void ctMarch(vec3 o, vec3 d, float t0, float t1, int ksIn, bool clipOn, float cL
                 tv = cHi;
                 kf = -2;
                 vis = true;
-            } else if (!clipOn || t < cLo || t >= cHi) {
+            } else if (!clipOn || t < cLo - tolAt(cLo) || t >= cHi) {
+                // (con la tolerancia: un plano entre vóxeles sobre el principio del corte es del corte; sin ella,
+                // el redondeo dejaba ver unos píxeles del vóxel de delante y otros no; undécima revisión)
                 vis = true;
             } else if (cHi < tn - tolAt(cHi)) {
                 // El corte acaba dentro de este vóxel; si acaba en su cara, lo que se ve es el siguiente.
@@ -414,9 +429,17 @@ void main() {
                 bool seen = false;
                 float tv = t;
                 int kf = ksIn;
-                if (!clipOn || t < cLo || t >= cHi) {
+                float tolHi = tolAt(cHi);
+                if (clipOn && cHi < BIG && abs(t - cHi) <= tolHi) {
+                    // El cuerpo empieza en el plano del corte (la cara de una hija en el mismo plano): es la cara
+                    // del corte. Sin la tolerancia, el redondeo pintaba unos píxeles como cara del corte del
+                    // cuerpo de antes y otros como superficie de este (undécima revisión).
                     seen = true;
-                } else if (cHi < tEnd) {
+                    tv = cHi;
+                    kf = -1 - cPlane;
+                } else if (!clipOn || t < cLo - tolAt(cLo) || t >= cHi) {
+                    seen = true;
+                } else if (cHi < tEnd - tolHi) {
                     seen = true;
                     tv = cHi;
                     kf = -1 - cPlane;
@@ -464,6 +487,7 @@ void main() {
         t = tEnd;
         p = o + t * d;
         int kn = locate(p, d, ks, sd, tolAt(t));
+        if (kb > uNBodys && kn <= uNBodys && !insideRoot(p, d, ks, sd, tolAt(t))) kn = kb;
         if (kn != kb) {
             kb = kn;
             ksIn = ks;

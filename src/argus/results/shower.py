@@ -144,12 +144,28 @@ class ShowerSet:
 
     @property
     def t_max(self) -> float:
-        return float(self.time.max()) if len(self.time) else 0.0
+        t = self.time[np.isfinite(self.time)] if len(self.time) else self.time
+        return float(t.max()) if len(t) else 0.0
+
+    def bad_mask(self) -> np.ndarray:
+        """Los puntos que no puede haber escrito penhmain (un .trk dañado): NaN, infinitos o a más de ``FAR_POINT``
+        cm. No se dibujan sus tramos ni cuentan para el tiempo (hasta 0.17.2, uno solo hacía desaparecer o aplastaba
+        toda la cascada en el visor)."""
+        p = np.asarray(self.points, dtype=np.float64)
+        if not len(p):
+            return np.zeros(0, dtype=bool)
+        return ~np.isfinite(p).all(axis=1) | (np.abs(np.nan_to_num(p, nan=0.0)) > FAR_POINT).any(axis=1)
+
+    @property
+    def bad_points(self) -> int:
+        return int(np.count_nonzero(self.bad_mask()))
 
     def bounds(self) -> tuple[np.ndarray, np.ndarray]:
-        if not len(self.points):
+        good = ~self.bad_mask() if len(self.points) else np.zeros(0, dtype=bool)
+        if not good.any():
             return np.zeros(3), np.zeros(3)
-        return self.points.min(axis=0), self.points.max(axis=0)
+        p = self.points[good]
+        return p.min(axis=0), p.max(axis=0)
 
     def subset(self, showers: range | slice | None = None, particles: set[int] | None = None) -> ShowerSet:
         """Las trayectorias de unas lluvias o partículas (para exportarlas o verlas en los cortes)."""
@@ -417,15 +433,22 @@ def _parents(pts: np.ndarray, starts: np.ndarray, skip: np.ndarray, energy: np.n
     return parent, multi
 
 
+FAR_POINT = 1.0e10  # cm: más lejos no hay geometría de PENGEOM (un punto así es de un .trk dañado)
 SOURCE_WINDOW = 2000  # partículas del espacio de fases que se miran por delante de la última encontrada
 
 
 def _match_source(roots: np.ndarray, particle: np.ndarray, first_pts: np.ndarray, first_e: np.ndarray,
-                  source: list[tuple]) -> dict[int, int]:
+                  source: list[tuple], one_each: bool = False) -> dict[int, int]:
     """La lluvia de cada primaria por su partícula del espacio de fases: [(KPAR, E, x, y, z, lluvia)] en el orden
     del fichero. penhmain las lee en orden y las copias de una (IPSPLI) salen del mismo punto con la misma energía:
     para cada tipo de partícula, cada primaria es la primera partícula de su tipo, desde la de la anterior, que sale
-    de su punto con su energía (penhmain escribe 6 cifras)."""
+    de su punto con su energía (penhmain escribe 6 cifras).
+
+    Si puede haber copias o partículas que la ruleta rusa no deja simular, una primaria que sale igual que otras
+    partículas de lluvias distintas puede ser de cualquiera: no se da por sabida (los cortes lo dicen). Hasta 0.17.2
+    se quedaba con la primera, y con un espacio de fases de partículas que salen todas del mismo punto con la misma
+    energía todas sus trayectorias iban a la lluvia 1 (dándose por exactas). Con ``one_each`` (ni ruleta ni copias:
+    :func:`penhan.cascade.psf_one_each`) cada primaria es la partícula siguiente de las que salen así."""
     out: dict[int, int] = {}
     if not len(roots):
         return out
@@ -442,8 +465,14 @@ def _match_source(roots: np.ndarray, particle: np.ndarray, first_pts: np.ndarray
             win = arr[j:j + SOURCE_WINDOW]
             ok = np.all(np.abs(win - q) <= 1e-5 * np.maximum(np.abs(win), np.abs(q)) + 1e-12, axis=1)
             hit = np.flatnonzero(ok)
-            if len(hit):
-                j += int(hit[0])
+            if not len(hit):
+                continue
+            h = int(hit[0])
+            if one_each:
+                out[int(roots[k])] = int(sh[j + h])
+                j += h + 1
+            elif np.all(sh[j + hit] == sh[j + h]):
+                j += h
                 out[int(roots[k])] = int(sh[j])
     return out
 
@@ -772,7 +801,7 @@ def _decay_points(pts: np.ndarray, energy: np.ndarray, starts: np.ndarray, roots
 def reconstruct(tracks: list[Tracks], primary: int | None = None, *, pieces: bool = False,
                 source: list[tuple] | None = None, n_source: int | None = None,
                 source_points: np.ndarray | None = None, extended: bool = False,
-                cuts: dict[int, dict[int, int]] | None = None) -> ShowerSet:
+                cuts: dict[int, dict[int, int]] | None = None, one_each: bool = False) -> ShowerSet:
     """El árbol de las lluvias de una ejecución (ver el principio del módulo).
 
     ``primary``: el tipo de partícula de la fuente (SKPAR), si es uno. ``pieces``: fuente radiactiva (penhmain
@@ -781,7 +810,8 @@ def reconstruct(tracks: list[Tracks], primary: int | None = None, *, pieces: boo
     espacio de fases, las de sus partículas; sin ella, las primarias que lo parecen). ``source_points``: el punto de
     una fuente puntual (como lo escribe penhmain). ``extended``: fuente extensa (SBOX). ``cuts``: {b: {KPAR:
     puntos}}, cuántos puntos había escrito penhmain en el fichero de cada tipo de partícula al acabar la lluvia b (lo
-    dice la misma ejecución repetida con NSIMSH = b, ``penhan.cascade``).
+    dice la misma ejecución repetida con NSIMSH = b, ``penhan.cascade``). ``one_each``: con un espacio de fases, de
+    cada partícula sale exactamente una trayectoria (``RunSource.one_each``).
 
     La lluvia de cada trayectoria sale solo de lo que es seguro (``_intervals``); la de las que no se sabe es -1 y
     ``needed`` dice qué cortes faltan para saberla."""
@@ -882,7 +912,7 @@ def reconstruct(tracks: list[Tracks], primary: int | None = None, *, pieces: boo
     if psf:
         roots_src = roots[~np.isin(roots, list(multi))]
         exact = _match_source(roots_src, particle, pts[starts[roots_src]] if len(roots_src) else np.zeros((0, 3)),
-                              energy[starts[roots_src]] if len(roots_src) else np.zeros(0), source)
+                              energy[starts[roots_src]] if len(roots_src) else np.zeros(0), source, one_each)
         info = _Mains([], [], exact)
     else:
         info = _source_mains(pts, energy, starts, particle, roots, n, primary=primary, pieces=pieces, point=point,
@@ -973,6 +1003,12 @@ def reconstruct(tracks: list[Tracks], primary: int | None = None, *, pieces: boo
     if npts > 1:
         seg_len[1:] = np.linalg.norm(pts[1:] - pts[:-1], axis=1)
     seg_len[starts[:-1]] = 0.0  # el primer punto de cada trayectoria no viene de la anterior
+    # Un punto que no puede ser de penhmain (NaN, infinito, a más de FAR_POINT cm: un .trk dañado) no cuenta para el
+    # tiempo: con él, el de todo lo que viene detrás sería NaN o enorme.
+    bad = ~np.isfinite(pts).all(axis=1) | (np.abs(np.nan_to_num(pts, nan=0.0)) > FAR_POINT).any(axis=1)
+    if bad.any():
+        seg_len[bad] = 0.0
+        seg_len[np.flatnonzero(bad[:-1]) + 1] = 0.0
     v = np.empty(npts, dtype=np.float64)
     for kp in np.unique(particle):
         mask = particle[track_of] == kp
@@ -982,6 +1018,7 @@ def reconstruct(tracks: list[Tracks], primary: int | None = None, *, pieces: boo
     v_prev[0] = v[0]
     v_prev[1:] = v[:-1]
     dt = np.where(seg_len > 0, seg_len / np.maximum(v_prev, 1e-9), 0.0)
+    dt = np.where(np.isfinite(dt), dt, 0.0)  # (una energía NaN en un .trk dañado)
     local = np.zeros(npts, dtype=np.float64)
     for i in range(m):  # tiempos dentro de cada trayectoria (desde su primer punto)
         a, b = starts[i], starts[i + 1]
@@ -1149,14 +1186,16 @@ class RunSource:
     points: np.ndarray | None = None  # el punto de una fuente puntual (como lo escribe penhmain)
     extended: bool = False  # fuente extensa (SBOX)
     psf_n: list[int] | None = None  # con un espacio de fases, el N de penhmain al acabar cada lluvia (para cortar)
+    # Con un espacio de fases: ¿sale de cada partícula exactamente una trayectoria (sin ruleta rusa ni copias de
+    # IPSPLI)? Entonces cada primaria es la partícula siguiente del fichero que sale de su punto con su energía,
+    # aunque la siguiente sea igual (un haz fino: las que no chocan llegan al mismo punto con la misma energía).
+    one_each: bool = False
 
 
 def run_source(folder: str | os.PathLike, in_name: str, showers: int | None = None) -> RunSource | None:
     """Lo que dice de su fuente el .in de una ejecución (None si no se puede leer). Con un espacio de fases, lee sus
     lluvias (hasta la primera con N ≥ ``showers``) en el fichero que leyó penhmain: el del caso o su trozo."""
-    from pathlib import PureWindowsPath
-
-    from ..penhan.cascade import psf_record, read_psf_showers
+    from ..penhan.cascade import psf_one_each, psf_record, psf_window, run_psf_showers
     from ..penhan.inputfile import parse_in_file
 
     folder = Path(folder)
@@ -1166,22 +1205,18 @@ def run_source(folder: str | os.PathLike, in_name: str, showers: int | None = No
         return None
     src = doc.model.source
     if src.from_psf:
-        paths = []
-        for n in src.psf:
-            n = n.strip()
-            if not n:
-                continue
-            absolute = PureWindowsPath(n).is_absolute() or n.startswith("/")
-            paths.append(Path(n) if absolute else folder / n.replace("\\", "/"))
-        groups = read_psf_showers(paths, int(showers) if showers else 2_000_000_000)
+        groups = run_psf_showers(folder, in_name, int(showers) if showers else None) or []
         parts = []
+        weights = []
         for g_idx, g in enumerate(groups):
             for ln in g.lines:
                 rec = psf_record(ln)
                 if rec is not None:
-                    kpar, e, x, y, z, _n = rec
+                    kpar, e, x, y, z, _n, w = rec
                     parts.append((kpar, e, x, y, z, g_idx))
-        return RunSource(None, True, parts, len(groups), psf_n=[g.n for g in groups])
+                    weights.append(w)
+        return RunSource(None, True, parts, len(groups), psf_n=[g.n for g in groups],
+                         one_each=psf_one_each(weights, psf_window(doc)))
     # Fuente puntual (sin SBOX): todo sale de SPOSIT, tal cual. Una lluvia por desintegración o partícula de la fuente:
     # las de la ejecución (NSIMSH).
     extended = bool(src.extended or src.bodies)
@@ -1262,7 +1297,7 @@ def load_run(folder: str | os.PathLike, primary: int | None = None, *, in_name: 
         s = reconstruct(read_run_tracks(folder, fort=src.pieces or bool(cuts)),
                         src.primary if src.primary is not None else (None if src.pieces else primary),
                         pieces=src.pieces, source=src.particles, n_source=src.n_showers, source_points=src.points,
-                        extended=src.extended, cuts=cuts)
+                        extended=src.extended, cuts=cuts, one_each=src.one_each)
         used = _ANY if own else primary
     _remember(key, (sig, used, s))
     return s
@@ -1298,20 +1333,22 @@ def load_cascade(info, primary: int | None = None, only_finished: bool = True) -
     """Las lluvias de una cascada (``penhan.cascade.CascadeInfo``) de las ejecuciones que ya han terminado y en las
     que se sabe la lluvia de cada trayectoria (o todas las que tengan trayectorias, sin ``only_finished``). La fuente
     de cada ejecución sale de su .in (``primary``, si no se puede leer)."""
-    from ..penhan.cascade import run_state
+    from ..penhan.cascade import run_counts, run_state
 
     sets, names, offsets = [], [], []
     off = 0
-    for r, d in zip(info.runs, info.run_paths):
+    # Cada ejecución, en su sitio: el de sus lluvias como se ven (con un espacio de fases, los grupos del fichero;
+    # hasta 0.17.2 se reservaban las de penhmain, N, y quedaban lluvias vacías al final de cada una).
+    for r, d, count in zip(info.runs, info.run_paths, run_counts(info)):
         if only_finished and run_state(d).status != "terminada":
-            off += r.showers  # su sitio se queda: las lluvias de las demás no cambian de número al terminar esta
+            off += count  # su sitio se queda: las lluvias de las demás no cambian de número al terminar esta
             continue
         s = load_run(d, primary, in_name=info.case or None, showers=r.showers)
         if s.count and (s.exact or not only_finished):
             sets.append(s)
             names.append(r.folder)
             offsets.append(off)
-        off += max(r.showers, s.n_showers)
+        off += max(count, s.n_showers)
     return merge(sets, names, offsets)
 
 

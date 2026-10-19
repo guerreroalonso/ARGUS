@@ -12,6 +12,7 @@ añade el CTBOX a la geometría y los materiales al .in (un paso de deshacer).
 from __future__ import annotations
 
 import html
+import math
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -46,10 +47,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..core.memory import available_memory
 from ..ct import Cancelled
 from ..ct.calibration import MNIS, PRESETS, Calibration, Tissue, preset, read_curve_file
 from ..ct.dicom import DicomError, HuVolume, Series, read_series, scan_folder
-from ..ct.grid import PLACEMENTS, auto_crop, estimate, make_grid, suggest_voxel
+from ..ct.grid import PLACEMENTS, auto_crop, estimate, import_memory, make_grid, suggest_voxel
 from ..ct.importer import (
     BuiltCt,
     CtImport,
@@ -882,6 +884,8 @@ class CtImportDialog(QDialog):
         self.vol = vol
         self._exact_crop = None
         self._exact_voxel = None
+        if vol is not None:
+            self._fit_fields_to(vol)
         for a, pv in self.previews.items():
             pv.set_volume(vol)
             sl = self.sliders[a]
@@ -889,6 +893,24 @@ class CtImportDialog(QDialog):
             sl.setRange(0, pv.count() - 1)
             sl.setValue(pv.index)
             sl.blockSignals(False)
+
+    def _fit_fields_to(self, vol: HuVolume) -> None:
+        """Los cuadros del recorte y del vóxel, a la escala de la serie (undécima revisión): el recorte, como mucho el
+        TAC más su tamaño a cada lado (antes ±1 km: 300 millones de vóxeles y ARGUS sin memoria); el vóxel, con las
+        cifras del de la serie y un mínimo por debajo de él (un micro-TAC de 0,005 mm se quedaba en 0,01 mm)."""
+        lo, hi = (np.asarray(b, dtype=float) for b in vol.bounds())
+        extent = float(np.max(hi - lo)) if np.all(np.isfinite(hi - lo)) else 0.0
+        margin = max(extent, 10.0 * float(min(vol.spacing())))
+        sp = float(min(vol.spacing()))
+        dec = 3 if sp >= 0.1 else min(8, 2 + int(math.ceil(-math.log10(sp))))
+        self._loading = True
+        for i, a in enumerate("xyz"):
+            for spin in (self.crop_lo[a], self.crop_hi[a]):
+                spin.setDecimals(max(2, dec - 1))
+                spin.setRange(float(lo[i] - margin), float(hi[i] + margin))
+            self.voxel[a].setDecimals(dec)
+            self.voxel[a].setRange(min(0.01, sp / 10.0), 1000.0)
+        self._loading = False
 
     def _on_loaded(self, vol: HuVolume) -> None:
         self._set_volume(vol)
@@ -1217,6 +1239,11 @@ class CtImportDialog(QDialog):
             out.append("El recorte no es válido.")
         elif g.shape[2] > NDD:
             out.append(f"El CT tendría {g.shape[2]} cortes y penhmain admite {NDD}: aumente dz o recorte.")
+        if g is not None:
+            need, free = import_memory(g, self.split_mode()), available_memory()
+            if free is not None and need > free:
+                out.append(f"Importar con esta rejilla necesitaría unos {human_size(need)} de memoria y hay "
+                           f"{human_size(free)} libres: aumente el vóxel o recorte.")
         out += list(dict.fromkeys(self._cell_errors.values()))
         out += self.calibration.problems()
         if self.in_doc is not None and self.session is not None and self.session.ok:

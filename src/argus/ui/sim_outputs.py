@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
 from ..core.numfmt import fmt_count, fmt_int, fmt_num, plural
 from ..penhan import sections as sc
 from ..penhan.batch import MAX_SEED_PAIR
-from ..penhan.dumpfile import read_dump, source_differences, tally_differences, tally_diffs
+from ..penhan.dumpfile import read_dump, source_differences, tally_diffs
 from .sim_widgets import (
     MAX_TIME,
     BinsEdit,
@@ -651,20 +651,30 @@ class DoseSection(Section):
         self.form.setRowVisible(self.size_note, bool(text))  # vacía, sin su línea
 
     def _resume_text(self) -> str:
-        """Con RESUME, penhmain toma la rejilla del volcado (DOSER) y no la del .in: se dice si no son la misma."""
+        """Con RESUME, penhmain toma la rejilla del volcado (DOSER) y no la del .in: se dice si no son la misma (lo
+        mismo que los mensajes: ``resume.resume_outcome``)."""
+        from ..penhan import resume as rs
+
         doc = self.doc
-        name = sc.text(doc, "RESUME") if doc is not None else None
-        if not name or self.folder is None:
-            return ""
-        info = read_dump(self.folder / name)
-        if not info.usable or info.title != doc.model.title[:65].rstrip():
+        out = rs.resume_outcome(doc, self.folder) if doc is not None else None
+        if out is None or not out.follows or out.info.tallies is None:
             return ""  # penhmain empieza de cero (o se detiene: lo dice el panel de mensajes)
-        diffs = tally_diffs(info, doc, ("grid",))
+        diffs = tally_diffs(out.info, doc, ("grid",))
         if not diffs:
             return ""
-        return (f"<span style='color:#9a6700'>Se reanuda de {html.escape(name)} (RESUME): penhmain sigue con la "
-                f"rejilla del volcado, no con esta ({html.escape(diffs[0][2])}). Para usar esta, empiece sin "
-                "RESUME.</span>")
+        name = html.escape(out.shown)
+        saved = out.info.tallies.grid
+        if saved is None:
+            text = (f"Se reanuda de {name} (RESUME): el volcado no tiene rejilla de dosis y penhmain no la calculará. "
+                    "Para usar esta, empiece sin RESUME.")
+        elif sc.dose_grid(doc).kind == "none":
+            text = (f"Se reanuda de {name} (RESUME): penhmain seguirá calculando la dosis en la rejilla del volcado "
+                    f"({html.escape(sc.grid_text(saved))}), aunque el .in no tenga ninguna. Para no calcularla, "
+                    "empiece sin RESUME.")
+        else:
+            text = (f"Se reanuda de {name} (RESUME): penhmain sigue con la rejilla del volcado, no con esta "
+                    f"({html.escape(diffs[0][2])}). Para usar esta, empiece sin RESUME.")
+        return f"<span style='color:#9a6700'>{text}</span>"
 
     @staticmethod
     def _size_of(g: sc.DoseGrid, k: str) -> float | None:
@@ -697,7 +707,12 @@ class DoseSection(Section):
         except ValueError as exc:
             self._set_size_note(str(exc))
             self._note_grid = g
+            self.voxel_size[k].set_value(self._size_of(g, k))  # el campo dice el vóxel que hay, no lo escrito
             return
+        if new == g:
+            # La rejilla no cambia (p. ej. ya tenía los intervalos de más que caben): no hay paso de deshacer ni se
+            # relee el .in, así que el campo se pone aquí con el vóxel que hay.
+            self.voxel_size[k].set_value(self._size_of(g, k))
         self.edit("Tamaño del vóxel", lambda doc: sc.set_dose_grid(doc, new))
         self._set_size_note(note or "")
         self._note_grid = new  # la nota es de esta rejilla: con otra (deshacer, otro .in…) se quita
@@ -897,8 +912,11 @@ class JobSection(Section):
         self.resume_state = hint("")
         self.resume_state.setTextFormat(Qt.TextFormat.RichText)
         f.addRow(self.resume_state)
-        self.dumpto = NameEdit("(sin volcado)")
-        self.dumpto.nameEdited.connect(lambda t: self.edit("Volcado final", lambda d: sc.set_text(d, "DUMPTO", t)))
+        # Sin DUMPTO, penhmain vuelca en dump.dmp (salvo con DUMPP ≥ 1e10): el marcador lo dice (duodécima revisión:
+        # decía «(sin volcado)»).
+        self.dumpto = NameEdit("dump.dmp")
+        self.dumpto.nameEdited.connect(lambda t: self.edit("Fichero del volcado",
+                                                           lambda d: sc.set_text(d, "DUMPTO", t)))
         f.addRow("Volcar en:", row(self.dumpto, "(DUMPTO)"))
         self.dumpto_state = hint("")
         self.dumpto_state.setTextFormat(Qt.TextFormat.RichText)
@@ -950,37 +968,81 @@ class JobSection(Section):
         self.dumpto.set_name(sc.text(doc, "DUMPTO") or "")
         v = sc.value(doc, "DUMPP")
         self.dumpp.set_value(v[0] if v else None)
-        self.dumpp.setPlaceholderText("no")
+        self.dumpp.setPlaceholderText("86400")  # sin DUMPP, penhmain vuelca una vez al día (y al acabar)
         self.dumpp_text.setText(_dump_period_text(doc))
-        self.resume_state.setText(self._dump_state(sc.text(doc, "RESUME"), resume=True))
-        self.dumpto_state.setText(self._dump_state(sc.text(doc, "DUMPTO"), resume=False))
+        from ..penhan import goals as gl
+        from ..results.folder import dump_period
 
-    def _dump_state(self, name: str | None, resume: bool) -> str:
-        if not name or self.folder is None:
+        self.dumpto.setPlaceholderText("dump.dmp" if dump_period(gl.dumpp(doc)) is not None else "(sin volcado)")
+        for label, text in ((self.resume_state, self._resume_state()), (self.dumpto_state, self._dumpto_state())):
+            label.setText(text)
+            self.form.setRowVisible(label, bool(text))  # vacía, sin su línea (duodécima revisión: dejaba un hueco)
+
+    def _resume_state(self) -> str:
+        """Lo que hará penhmain con RESUME (lo mismo que los mensajes y «Ejecutar»: ``resume.resume_outcome``)."""
+        from ..penhan import resume as rs
+
+        out = rs.resume_outcome(self.doc, self.folder, self.geo)
+        if out is None:
             return ""
-        info = read_dump(self.folder / name)
-        e = html.escape(name)
+        e = html.escape(out.shown)
+        red, amber = "#b42318", "#9a6700"
+        if out.blank:
+            return (f"<span style='color:{red}'>penhmain buscaría «{html.escape(out.name)}», con el blanco delante, y "
+                    f"no {e}: {html.escape(out.why)}, se empezaría desde cero. Quite el blanco.</span>")
+        if out.action == rs.FRESH:
+            return f"{e} {html.escape(out.why)}: se empieza desde cero."
+        if out.action == rs.DESTROY:
+            return (f"<span style='color:{red}'>{e} {html.escape(out.why)}: penhmain escribiría «Empty.» encima (se "
+                    "perdería).</span>")
+        if out.action == rs.STOP:
+            return f"<span style='color:{red}'>{e} {html.escape(out.why)}: penhmain se detendría.</span>"
+        if out.action == rs.DONE:
+            return (f"<span style='color:{amber}'>{e}: ya está terminada ({html.escape(out.why)}); penhmain solo "
+                    "volverá a escribir los resultados (con el tiempo de cálculo a 0).</span>")
+        diffs = [text for _key, text in out.diffs] + out.tallies
+        text = f"{e}: {rs.showers_note(out)}"
+        text += (" con otra configuración (" + html.escape("; ".join(diffs)) + ")") if diffs else \
+            " con esta configuración"
+        return f"<span style='color:{amber}'>{text}.</span>"
+
+    def _dumpto_state(self) -> str:
+        """Dónde escribirá penhmain el volcado y qué pasará con lo que ya hay en ese fichero."""
+        from ..penhan import resume as rs
+
+        doc = self.doc
+        target = rs.dump_target(doc, self.folder) if self.folder is not None else None
+        if target is None:
+            return ""
+        e = html.escape(target.shown)
+        red, amber, grey = "#b42318", "#9a6700", "#666"
+        if target.problem:
+            tail = ": penhmain se detendría al escribir el primer volcado" if target.stops else ""
+            return f"<span style='color:{red}'>{e} {html.escape(target.problem)}{tail}.</span>"
+        res = rs.open_name(doc, "RESUME")
+        if res is not None and rs.rel_key(res) == rs.rel_key(target.name):
+            return ""  # el mismo que «Reanudar de» (lo dice su línea)
+        info = read_dump(self.folder / target.name)
+        if not target.explicit and info.state in ("missing", "empty"):
+            return ""  # el «dump.dmp» de siempre, que aún no hay
         if info.state == "missing":
-            return f"{e} no existe" + (": se empieza desde cero." if resume else ": se creará al simular.")
+            return f"{e} no existe: se creará al simular."
         if info.state == "empty":
-            return f"{e} no tiene una simulación guardada" + (": se empieza desde cero." if resume else ".")
+            return f"{e} no tiene una simulación guardada."
+        if info.state == "foreign":
+            return (f"<span style='color:{red}'>{e} no es un volcado de penhmain ({html.escape(info.message)}): "
+                    "penhmain lo sustituiría por el volcado (se perdería).</span>")
         if not info.usable:
-            return f"<span style='color:#b42318'>{e} está dañado o incompleto.</span>"
-        diffs = source_differences(info, self.doc, self.geo)
-        if resume:  # al reanudar, penhmain sigue con las rejillas y los intervalos del volcado
-            diffs += tally_differences(info, self.doc)
-        title_ok = info.title == self.doc.model.title[:65].rstrip()
-        text = f"{e}: {_count(info.showers)} partículas simuladas"
-        if not title_ok:
-            text += " de otra simulación (otro título)"
-            color = "#b42318" if resume else "#666"
-        elif diffs:
-            text += " con otra configuración (" + html.escape("; ".join(diffs)) + ")"
-            color = "#9a6700"
-        else:
-            text += " con esta configuración"
-            color = "#9a6700" if resume else "#1a7f37"
-        return f"<span style='color:{color}'>{text}.</span>"
+            return f"<span style='color:{grey}'>{e} está dañado o incompleto: penhmain lo sustituirá al simular.</span>"
+        n = rs.count_text(info.showers, info.kparp == 0)
+        if info.title != doc.model.title[:65].rstrip():
+            return f"<span style='color:{grey}'>{e}: {n} de otra simulación (otro título); se sustituirá.</span>"
+        diffs = source_differences(info, doc, self.geo)
+        if diffs:
+            return (f"<span style='color:{grey}'>{e}: {n} con otra configuración (" + html.escape("; ".join(diffs))
+                    + "); se sustituirá.</span>")
+        return (f"<span style='color:{amber}'>{e}: {n} de esta simulación; sin RESUME, penhmain empieza desde cero y "
+                "lo sustituirá (para seguirla, póngalo en «Reanudar de»).</span>")
 
     def _on_seed_kind(self, _i: int) -> None:
         seeds = sc.seeds(self.doc)
@@ -1007,9 +1069,14 @@ class JobSection(Section):
         n = v[0] if v else 2e9
         t = sc.value(doc, "TIME")
         tt = t[0] if t else 2e9
-        parts = [f"{_count(n)} partículas", f"máx. {_duration(tt if tt >= 1 else 100.0)}"]
-        if sc.text(doc, "RESUME"):
-            parts.append(f"reanuda de {sc.text(doc, 'RESUME')}")
+        from ..penhan import resume as rs
+
+        src = doc.model.source
+        parts = [rs.count_text(n, src.radioactive and not src.psf), f"máx. {_duration(tt if tt >= 1 else 100.0)}"]
+
+        out = rs.resume_outcome(doc, self.folder, self.geo)
+        if out is not None:
+            parts.append(rs.short_state(out))  # solo «reanuda de …» si penhmain la sigue (duodécima revisión)
         return ", ".join(parts)
 
 

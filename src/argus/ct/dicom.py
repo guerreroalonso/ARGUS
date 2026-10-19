@@ -489,7 +489,9 @@ def _finish(s: Series) -> Series:
     z = s.z_positions
     if z.size > 1:
         dz = np.diff(z)
-        if np.any(dz < 1e-3):
+        # Repetidos: a menos de 1 µm, o de la centésima del píxel en un micro-TAC (undécima revisión: con cortes
+        # de 0,5 µm, todos eran «repetidos»).
+        if np.any(dz < min(1e-3, 0.01 * min(s.pixel_spacing))):
             _problem(s, "Hay cortes repetidos en la misma posición (¿dos adquisiciones en la misma serie?).")
             return s
         # Desplazamiento de los cortes dentro de su plano: gantry inclinado.

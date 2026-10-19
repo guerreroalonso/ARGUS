@@ -30,7 +30,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..core.numfmt import fmt_count
+from ..core.numfmt import fmt_count, fmt_num
 from .catalog import KINDS, Identified, identify
 from .data import PARTICLE_NAMES
 from .formats import read_head
@@ -292,7 +292,8 @@ def replica_problem(runs: list[ResultsFolder]) -> str | None:
             path = r.path / "geometry.rep"
         geos.append(_cached(path, _file_hash) if path.is_file() else None)
     if len({s[0] for s in sigs}) > 1:
-        return "no simulan el mismo caso (sus .in no son iguales, aparte de las semillas, las partículas y el tiempo)"
+        return ("no simulan el mismo caso (sus .in no son iguales, aparte de las semillas, las partículas, el tiempo y "
+                "los volcados)")
     if len(set(geos)) > 1:
         return "no simulan el mismo caso (sus geometrías no son iguales)"
     seeds = [s[1] for s in sigs]
@@ -363,6 +364,25 @@ def simulation_clock(s, prev: tuple | None, tlimit: float) -> tuple[float, float
             if dcpu > 0:
                 return min(total, max(cpu, cpu * dt / dcpu)), rate
     return (total if total < tlimit else min(cpu, total)), rate
+
+
+def _log_date(path: Path) -> str | None:
+    """La fecha en que empezó la ejecución que escribió este penhmain.dat («Date and time: …», la misma que lleva su
+    penhmain-res.dat: PDATET al empezar, penhmain.f 2447)."""
+    for line in read_head(path, 2048).splitlines()[:12]:
+        if line.strip().lower().startswith("date and time:"):
+            return line.split(":", 1)[1].strip()
+    return None
+
+
+def _fmt_period(t: float) -> str:
+    """El periodo de los volcados (DUMPP), sin redondear: «90 s», «150 s», «2 h», «1 día» (duodécima revisión:
+    90 y 150 s eran los dos «2 min»)."""
+    if t >= 86400:
+        return _fmt_duration(t)
+    if t >= 3600:
+        return f"{fmt_num(t / 3600, 3)} h"
+    return f"{fmt_num(t, 6)} s"
 
 
 def _fmt_duration(t: float) -> str:
@@ -478,6 +498,10 @@ class ResultsFolder:
             elif time.time() - st.st_mtime <= STALE_MARGIN and str(p) in _LAST_ID:
                 # penhmain lo está reescribiendo (vacío o con la cabecera a medias): sigue siendo lo que era.
                 ident = _LAST_ID[str(p)]
+            elif st.st_size == 0 and name == "penhmain.dat":
+                # El registro recién abierto: gfortran no escribe nada al disco hasta llenar su búfer (duodécima
+                # revisión: mientras se inicializaba, la carpeta salía «vacía»).
+                ident = Identified("log")
             if ident is not None:
                 files.append(OutputFile(p, ident, st.st_size, st.st_mtime))
         _mark_copies(files)
@@ -629,9 +653,13 @@ class ResultsFolder:
         tlimit = 2.0e9 if not info or info.time_limit is None else max(info.time_limit, 0.0)
         if tlimit < 1.0:
             tlimit = 100.0
+        time_left = None  # con RESUME: lo que le queda de TIME a esta ejecución (desde su registro)
         if info and info.resume:
             # TIME cuenta desde que empieza esta ejecución, pero el tiempo del resumen suma el de las anteriores
-            # (TIMET = TSEC + TIMETA en penhmain.f): el final por tiempo solo se sabe por el «END» del registro.
+            # (TIMET = TSEC + TIMETA en penhmain.f): el final por tiempo solo se sabe por el «END» del registro. Lo que
+            # queda sí se sabe por el registro (penhmain.dat), que penhmain escribe al empezar y no vuelve a tocar
+            # hasta el final (duodécima revisión: con TIME 50, «faltan unos 4,2 días»).
+            time_left = tlimit
             tlimit = float("inf")
         period = dump_period(info.dumpp if info else None)
         run_log = next((f for f in self.files if f.kind == "run-log" and f.ident.variant != "sum" and not f.copy),
@@ -670,8 +698,24 @@ class ResultsFolder:
         sim_time, rate = simulation_clock(s, _previous_dump(res.path, s), tlimit)
         progress = min(max(n / target, sim_time / tlimit), 1.0) if target else None
         eta = (target - n) / rate if rate and target > n else None
+        # ¿De qué ejecución es el registro (penhmain.dat)? Lleva la fecha en que empezó la suya, como el resumen; pero
+        # gfortran no lo escribe al disco hasta llenar su búfer o acabar: mientras simula suele estar vacío, con la
+        # fecha (de modificación) de cuando lo abrió, al empezar. Vacío y anterior al resumen: es de la ejecución que
+        # escribió el resumen; vacío y posterior, o con otra fecha y posterior: de otra que empieza.
+        log_date = _log_date(pen_log.path) if pen_log is not None and pen_log.size > 0 else None
+        log_empty = pen_log is not None and log_date is None  # (vacío, o solo con la cabecera: sin la fecha aún)
+        same_run = pen_log is not None and bool(s.date) and (
+            (log_empty and pen_log.mtime < res.mtime) or (log_date is not None and log_date == s.date))
+        new_run = pen_log is not None and bool(s.date) and pen_log.mtime >= res.mtime and (
+            log_empty or (log_date is not None and log_date != s.date))
         if math.isfinite(tlimit) and tlimit > sim_time and (eta is None or tlimit - sim_time < eta):
             eta = tlimit - sim_time  # TIME acabará antes que NSIMSH
+        elif time_left is not None and same_run:
+            # TIME cuenta desde que acaba la inicialización de esta ejecución; el registro se abre al empezarla (lo
+            # que queda, como mucho esto).
+            left = max(time_left - (now - pen_log.mtime), 0.0)
+            if eta is None or left < eta:
+                eta = left
         base = dict(showers=n, target=target, progress=progress, eta=eta, speed=s.speed or None,
                     updated=res.mtime, decays=decays)
         count = count_text(n, decays) + (f" de {fmt_count(target)}" if info and info.nsimsh else "")
@@ -696,13 +740,20 @@ class ResultsFolder:
             return RunState("terminada", f"Terminada: {count}{why}.", **{**base, "progress": 1.0, "eta": None})
         if err:
             return RunState("error", f"penhmain se ha detenido tras {count}: {err}", error=err, **base)
+        if new_run and now - pen_log.mtime <= (period or PENHMAIN_DUMPP) + STALE_MARGIN:
+            # El registro es de otra ejecución, posterior al resumen: penhmain ha vuelto a empezar (con RESUME siempre
+            # hay resultados de antes) y aún no ha escrito el primer volcado (DUMPP segundos tras el arranque, contando
+            # la inicialización). Duodécima revisión: decía «parada».
+            what = ("reanudando la simulación" if info and info.resume else "ha vuelto a empezar")
+            return RunState("empezando", f"penhmain está {what} y aún no ha escrito resultados nuevos: los que hay "
+                            f"son de antes ({count}).", **{**base, "eta": None})
         age = now - res.mtime
         if not s.complete or period is None or age <= period + STALE_MARGIN:
             text = f"Simulando: {count}"
             if eta is not None:
                 text += f"; faltan unos {_fmt_duration(eta)}"
             if period is not None:
-                text += f" (resultados cada {_fmt_duration(period)})"
+                text += f" (resultados cada {_fmt_period(period)})"
             return RunState("simulando", text + ".", **base)
         # Sin el registro de penhmain no se sabe si acabó por TIME (el tiempo total incluye la inicialización).
         maybe = " o ha terminado por el tiempo de TIME" if math.isfinite(tlimit) and s.time_total >= tlimit else ""

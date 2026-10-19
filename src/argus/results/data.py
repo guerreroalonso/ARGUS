@@ -210,6 +210,16 @@ class Tracks:
         return self.points[:-1][keep], self.points[1:][keep]
 
 
+TRACKS_ON_GEOMETRY = 40_000  # puntos de trayectorias que caben en los cortes y la vista 3D de la ventana principal
+
+
+class TrackList(list):
+    """Trayectorias para dibujar sobre la geometría (una lista de :class:`Tracks`) y ``note``: qué parte son (las
+    primeras lluvias enteras de una cascada, si no caben todas)."""
+
+    note: str = ""
+
+
 def fair_shares(sizes, total: int) -> list[int]:
     """Reparte ``total`` (puntos o tramos que se pueden dibujar) entre grupos que tienen ``sizes``: a partes
     iguales, y lo que no necesita un grupo pequeño, para los demás. Así un tipo de partícula con muchas

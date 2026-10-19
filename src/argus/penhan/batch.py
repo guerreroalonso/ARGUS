@@ -122,8 +122,8 @@ class Param:
         if kw6(kw) not in sc.SPEC:
             raise ValueError(f"«{kw}» no es una palabra clave del .in de penhmain")
         if kw in RUN_SET_BY_ARGUS:
-            raise ValueError(f"{kw} lo pone ARGUS en cada ejecución (semillas distintas, volcados, sin RESUME): no "
-                             "puede ser un parámetro de la campaña")
+            raise ValueError(f"{kw} lo decide ARGUS en cada ejecución (semillas distintas, su propio volcado y sin "
+                             "RESUME): no puede ser un parámetro de la campaña")
         if kw == "SCONE" and sc.value(doc, "SRECTA") and not sc.value(doc, "SCONE"):
             raise ValueError("La fuente emite en una ventana rectangular (SRECTA): un cono (SCONE) la sustituiría")
         cur = sc.value(doc, kw)
@@ -473,24 +473,59 @@ def combine_scripts(batch: BatchPlan) -> dict[str, str]:
           "elseif (-not (Get-Command $Sum -ErrorAction SilentlyContinue)) { Write-Host \"No se encuentra penhmain-sum: "
           "$Sum\"; exit 1 }",
           "Set-Location -LiteralPath $PSScriptRoot"]
+    # penhmain-sum acaba con el código 0 aunque no haya podido combinar («Inconsistent dump file format», otro título)
+    # y crea vacío el volcado que falta (OPEN sin STATUS): antes se mira que cada ejecución tenga su volcado completo
+    # y después, que haya escrito el resumen y su «***  END  ***». Si falla, la carpeta «suma» (que crea el guion) se
+    # renombra, para poder volver a combinar (duodécima revisión: decía «Combinadas» y no dejaba repetir).
     for folder, runs in groups:
         base = folder or "."
         target = f"{base}/suma" if folder else "suma"
         depth = "../" * (target.count("/") + 1)
         dumps = [depth + r.folder + "/dump.dmp" for r in runs]
-        sh.append(f"mkdir {_sh_quote(target)} 2>/dev/null || {{ echo 'Ya existe {target}: no se toca.'; exit 1; }}")
+        own = [r.folder + "/dump.dmp" for r in runs]
+        sh.append("argus_ok=1")
+        sh.append("for f in " + " ".join(_sh_quote(d) for d in own) + "; do")
+        sh.append("  tail -c 400 \"$f\" 2>/dev/null | grep -q '[*][*][*] END [*][*][*]' || { echo \"Aun no hay un "
+                  f"volcado completo en $f: no se combina {target}.\"; argus_ok=0; argus_fail=1; }}")
+        sh.append("done")
+        sh.append('if [ "$argus_ok" = 1 ]; then')
+        sh.append(f"  mkdir {_sh_quote(target)} 2>/dev/null || {{ echo 'Ya existe {target}: no se toca.'; exit 1; }}")
         listing = "\\n".join(dumps)
-        sh.append(f"(cd {_sh_quote(target)} && printf '{listing}\\n' | \"$SUM\" > penhmain-sum.out 2>&1) && "
-                  f"echo 'Combinadas en {target}'")
+        sh.append(f"  if (cd {_sh_quote(target)} && printf '{listing}\\n' | \"$SUM\" > penhmain-sum.out 2>&1) && "
+                  f"[ -f {_sh_quote(target + '/penhmain-res.dat')} ] && "
+                  f"grep -q '[*][*][*]  END  [*][*][*]' {_sh_quote(target + '/penhmain-sum.out')}; then")
+        sh.append(f"    echo 'Combinadas en {target}'")
+        sh.append("  else")
+        sh.append(f"    argus_bad={_sh_quote(target)}-fallida-$(date +%Y%m%d-%H%M%S)")
+        sh.append(f"    mv {_sh_quote(target)} \"$argus_bad\" && echo \"penhmain-sum ha fallado: vea "
+                  "$argus_bad/penhmain-sum.out\"")
+        sh.append("    argus_fail=1")
+        sh.append("  fi")
+        sh.append("fi")
         win_target = target.replace("/", "\\")
-        ps.append(f"if (Test-Path -LiteralPath '{win_target}') {{ Write-Host 'Ya existe {win_target}: no se toca.'; "
-                  "exit 1 }")
-        ps.append(f"New-Item -ItemType Directory -Path '{win_target}' | Out-Null")
+        leaf = win_target.rsplit("\\", 1)[-1]
+        parent = win_target[:-len(leaf)]
+        win_own = ",".join("'" + d.replace("/", "\\") + "'" for d in own)
+        ps.append("$argusOk = $true")
+        ps.append(f"foreach ($f in @({win_own})) {{ if (-not ((Test-Path -LiteralPath $f) -and ((Get-Content "
+                  "-LiteralPath $f -Tail 3) -match '\\*\\*\\* END \\*\\*\\*'))) { Write-Host ('Aun no hay un volcado "
+                  f"completo en ' + $f + ': no se combina {win_target}.'); $argusOk = $false; $argusFail = $true }} }}")
+        ps.append("if ($argusOk) {")
+        ps.append(f"  if (Test-Path -LiteralPath '{win_target}') {{ Write-Host 'Ya existe {win_target}: no se "
+                  "toca.'; exit 1 }")
+        ps.append(f"  New-Item -ItemType Directory -Path '{win_target}' | Out-Null")
         ps_list = "`n".join(d.replace("/", "\\") for d in dumps)
-        ps.append(f"Push-Location -LiteralPath '{win_target}'; \"{ps_list}\" | & $Sum > penhmain-sum.out 2>&1; "
-                  "$ok = $?; Pop-Location")
-        ps.append(f"if ($ok) {{ Write-Host 'Combinadas en {win_target}' }} else {{ Write-Host 'penhmain-sum ha "
-                  f"fallado: vea {win_target}\\penhmain-sum.out' }}")
+        ps.append(f"  Push-Location -LiteralPath '{win_target}'; \"{ps_list}\" | & $Sum > penhmain-sum.out 2>&1; "
+                  "Pop-Location")
+        ps.append(f"  if ((Test-Path -LiteralPath '{win_target}\\penhmain-res.dat') -and (Select-String -LiteralPath "
+                  f"'{win_target}\\penhmain-sum.out' -SimpleMatch '***  END  ***' -Quiet)) {{ Write-Host 'Combinadas "
+                  f"en {win_target}' }}")
+        ps.append(f"  else {{ $bad = '{leaf}-fallida-' + (Get-Date -Format 'yyyyMMdd-HHmmss'); Rename-Item "
+                  f"-LiteralPath '{win_target}' -NewName $bad; Write-Host ('penhmain-sum ha fallado: vea "
+                  f"{parent}' + $bad + '\\penhmain-sum.out'); $argusFail = $true }}")
+        ps.append("}")
+    sh.append('exit "${argus_fail:-0}"')
+    ps.append("if ($argusFail) { exit 1 }")
     out["combinar.sh"] = "\n".join(sh) + "\n"
     if batch.with_wsl:
         # penhmain (y penhmain-sum) de Linux en Windows: se combina con combinar.sh dentro de WSL.

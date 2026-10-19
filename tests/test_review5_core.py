@@ -259,7 +259,7 @@ def test_campaign_over_nsimsh_and_dumpp(case, tmp_path):
     assert vals == [[5e3, 5e3], [5e4, 5e4]] and got
     b = bt.make_campaign(doc, case, tmp_path / "d", [bt.Param("keyword", [120, 600], keyword="DUMPP")])
     assert [sc.value(parse_in_text(v.runs[0].in_text), "DUMPP")[0] for v in b.variants] == [120, 600]
-    with pytest.raises(ValueError, match="lo pone ARGUS"):
+    with pytest.raises(ValueError, match="lo decide ARGUS"):
         bt.make_campaign(doc, case, tmp_path / "e", [bt.Param("keyword", [1, 2], keyword="RSEED")])
 
 

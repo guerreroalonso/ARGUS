@@ -604,13 +604,15 @@ class BinsEdit(QWidget):
 
 
 class NameEdit(QLineEdit):
-    """Nombre de fichero (hasta 20 caracteres); vacío = el nombre por defecto de penhmain."""
+    """Nombre de fichero (penhmain lee 20 caracteres); vacío = el nombre por defecto de penhmain.
+
+    Sin límite de longitud en el campo: uno pegado de más de 20 caracteres se cortaba sin avisar (duodécima revisión);
+    ahora llega al .in, que lo rechaza diciendo por qué (``InDocument.set``)."""
 
     nameEdited = Signal(str)
 
     def __init__(self, placeholder: str = "", parent=None):
         super().__init__(parent)
-        self.setMaxLength(20)
         self.setPlaceholderText(placeholder)
         self.editingFinished.connect(self._commit)
 

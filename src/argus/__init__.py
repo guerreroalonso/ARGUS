@@ -3,4 +3,4 @@
 Constructor y visor de ficheros de entrada de PENGEOM (.geo) y penhmain (.in).
 """
 
-__version__ = "0.17.2"
+__version__ = "0.17.4"

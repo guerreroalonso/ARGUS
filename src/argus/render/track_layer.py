@@ -168,23 +168,36 @@ class TrackLayerData:
 
 
 def layer_from_showers(s) -> TrackLayerData:
-    """De una cascada (``results.shower.ShowerSet``)."""
+    """De una cascada (``results.shower.ShowerSet``). Los puntos que no pueden ser de penhmain (``bad_mask``: un .trk
+    dañado) no cuentan para el origen ni se dibujan sus tramos (hasta 0.17.2, uno NaN o de 1e30 cm hacía desaparecer
+    o aplastaba toda la cascada: los vértices son float32 relativos al centro)."""
     pts = np.asarray(s.points, dtype=np.float64)
-    if len(pts):
-        origin = 0.5 * (pts.min(axis=0) + pts.max(axis=0))
+    bad = s.bad_mask() if hasattr(s, "bad_mask") else np.zeros(len(pts), dtype=bool)
+    if bad.any():
+        pts = pts.copy()
+    good = ~bad
+    if good.any():
+        origin = 0.5 * (pts[good].min(axis=0) + pts[good].max(axis=0))
     else:
         origin = np.zeros(3)
+    if bad.any():
+        pts[bad] = origin  # (finitos: no se dibujan, pero no deben estropear nada)
     n = len(pts)
     track_of = np.repeat(np.arange(s.count, dtype=np.int64), np.diff(s.starts))
     v = np.zeros((n, 8), dtype=np.float32)
     v[:, :3] = pts - origin
-    v[:, 3] = s.time
-    e = np.maximum(np.asarray(s.energy, dtype=np.float64), 1.0)
+    t = np.asarray(s.time, dtype=np.float64)
+    v[:, 3] = np.where(np.isfinite(t), t, 0.0)
+    e = np.asarray(s.energy, dtype=np.float64)
+    e = np.maximum(np.where(np.isfinite(e), e, 1.0), 1.0)
     v[:, 4] = np.log10(e)
     v[:, 5] = s.particle[track_of]
     v[:, 6] = s.shower[track_of]
     v[:, 7] = s.generation[track_of]
     a, b = s.segments()
+    if bad.any():
+        ok = good[a] & good[b]
+        a, b = a[ok], b[ok]
     # Primero los fotones y los neutrones y encima las partículas cargadas: con muchas lluvias, los fotones (que van
     # lejos) taparían las trayectorias cortas de los electrones o los protones.
     prio = DRAW_PRIORITY[np.clip(v[a, 5].astype(np.int64), 0, len(DRAW_PRIORITY) - 1)]

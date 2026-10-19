@@ -147,7 +147,7 @@ def test_the_cascade_signature_does_not_depend_on_where_the_endf_are(tmp_path):
     old_before = cs.case_signature(in_path, doc, exe, 100, legacy=True)
     for f in mine.iterdir():
         copy_new(f, in_path.parent / f.name)
-    after, old_after = cs.signatures(in_path, doc, exe, 100)
+    after, _dated, old_after = cs.signatures(in_path, doc, exe, 100)  # (la del medio, la de 0.16.2–0.17.2)
     assert before == after
     assert old_before != old_after  # (la de antes cambiaba)
     assert old_after in cs.signatures(in_path, doc, exe, 100)  # una cascada de 0.16.1 con los ENDF ahí: es esta
@@ -332,7 +332,7 @@ def test_the_old_signature_of_a_radioactive_source_without_alphas(tmp_path):
     assert not any(p.startswith(b"endf:") for p in cs._file_parts(in_path, doc))
     old = cs._file_parts(in_path, doc, endf=True)
     assert sum(p.startswith(b"endf:") for p in old) == 2
-    new, legacy = cs.signatures(in_path, doc, None, 100)
+    new, _dated, legacy = cs.signatures(in_path, doc, None, 100)
     assert new != legacy
 
 

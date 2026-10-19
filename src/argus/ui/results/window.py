@@ -1601,8 +1601,10 @@ class ResultsWindow(QMainWindow):
         # Lo que se veía antes en la ventana principal se quita (el mapa de dosis al pasar a la cascada, las
         # trayectorias al pasar a un mapa o al resumen…).
         if isinstance(self.current_data, CascadeData):
+            from ...results.data import TRACKS_ON_GEOMETRY
+
             w = self.views.currentWidget()
-            tracks = w.visible_tracks() if hasattr(w, "visible_tracks") else []
+            tracks = w.visible_tracks(TRACKS_ON_GEOMETRY) if hasattr(w, "visible_tracks") else []
             self.showOnGeometry.emit(None)
             self.showTracksOnGeometry.emit(tracks or None)
             return

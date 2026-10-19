@@ -18,6 +18,13 @@ Se calcula en dos pasos:
 
 Si los dos pasos coinciden (a 1e-9 del tamaño), se toma el valor analítico,
 que es exacto (y «redondo»).
+
+Desde la undécima revisión (0.17.3), la caja sale primero de las ecuaciones
+(``exact_box``: el máximo de cada coordenada en las superficies propias de
+cada cuerpo, ``support.region_box``): los rayos no veían lo fino ni lo
+inclinado (una lámina de 50 µm girada 80° salía 0,37 cm más corta y
+«Envolver» la cortaba). Los rayos y el muestreo quedan para los ejes en que
+las superficies no acotan nada (un cuerpo que solo cierra su módulo).
 """
 
 from __future__ import annotations
@@ -99,6 +106,74 @@ def _keep(geo, name: str, value) -> None:
         pass
 
 
+def own_constraints(geo, kb: int) -> list[tuple[np.ndarray, np.ndarray, float]]:
+    """Las superficies propias de ``kb`` (sin la esfera de la envolvente) como regiones g(r) = rᵀAr + b·r + c ≤ 0."""
+    out = []
+    for ks, side in geo.body(kb).own_surfaces():
+        sf = geo.surface(ks)
+        if sf.origin == "enclosure":
+            continue
+        a, b, c = _matrix(sf.q)
+        out.append((-side * a, -side * b, -side * c))
+    return out
+
+
+def exact_box(geo, kb: int) -> tuple[np.ndarray, np.ndarray]:
+    """Caja exacta de lo que está dentro de las superficies propias de ``kb`` (``support.region_box``): infinita en los
+    ejes que no acotan; vacía (lo > hi) si no dejan nada. Se guarda con la geometría."""
+    cache = getattr(geo, "_argus_exact", None)
+    if cache is None:
+        cache = {}
+        _keep(geo, "_argus_exact", cache)
+    if kb not in cache:
+        from .support import region_box
+
+        try:
+            cache[kb] = region_box(own_constraints(geo, kb))
+        except (ValueError, np.linalg.LinAlgError, FloatingPointError):  # pragma: no cover - nunca debería pasar
+            cache[kb] = analytic_box(geo, kb)
+    lo, hi = cache[kb]
+    return lo.copy(), hi.copy()
+
+
+def exact_element_box(geo, kb: int) -> tuple[np.ndarray, np.ndarray]:
+    """Caja exacta del elemento: dentro de sus superficies y de las de los módulos que lo contienen
+    (``locate_bound``: un cuerpo de un módulo no pasa de él; en el maniquí adulto, los trozos del pulmón llegaban a
+    20 cm del pecho). Un cuerpo, con los huecos de sus limitantes (lo que asoma de ellos lo añade ``members_box``);
+    un módulo, con sus hijas (también lo que asome). Infinita en los ejes en que ni así tiene cota; vacía si no hay
+    nada."""
+    lo, hi = locate_bound(geo, kb)
+    if not geo.body(kb).is_module:
+        return lo, hi
+    if np.any(hi < lo):
+        lo, hi = np.full(3, np.inf), np.full(3, -np.inf)
+    members = solid_bodies(geo, kb)
+    quick: dict[int, tuple[np.ndarray, np.ndarray]] = {}
+
+    def analytic_in(k: int) -> tuple[np.ndarray, np.ndarray]:
+        """La caja de sus superficies dentro de la de sus módulos (dentro del elemento): al momento."""
+        if k not in quick:
+            a_lo, a_hi = analytic_box(geo, k)
+            m = geo.body(k).mother
+            if m in members and m != k:
+                m_lo, m_hi = analytic_in(m)
+                a_lo, a_hi = np.maximum(a_lo, m_lo), np.minimum(a_hi, m_hi)
+            quick[k] = (a_lo, a_hi)
+        return quick[k]
+
+    for k in sorted(members - {kb}):
+        # (Lo que sus superficies y las de sus módulos ya dejan dentro de lo de hasta ahora no puede asomar: sin la
+        # cuenta exacta.)
+        a_lo, a_hi = analytic_in(k)
+        if np.any(a_hi < a_lo) or (np.all(a_lo >= lo) and np.all(a_hi <= hi)):
+            continue
+        k_lo, k_hi = locate_bound(geo, k)
+        if np.any(k_hi < k_lo):
+            continue
+        lo, hi = np.minimum(lo, k_lo), np.maximum(hi, k_hi)
+    return lo, hi
+
+
 def own_box(geo, kb: int, bounds=None) -> tuple[np.ndarray, np.ndarray]:
     """Caja finita del elemento ``kb`` (con lo que tiene dentro): la analítica y, en los ejes que sus superficies
     no acotan (un cubo girado: planos oblicuos), una que contiene sus puntos.
@@ -110,7 +185,11 @@ def own_box(geo, kb: int, bounds=None) -> tuple[np.ndarray, np.ndarray]:
     así, con rayos. Es para muestrear: puede ser algo mayor que el elemento.
     Se guarda con la geometría.
     """
-    lo, hi = element_box(geo, kb)
+    lo, hi = exact_element_box(geo, kb)
+    if (np.all(np.isfinite(lo)) and np.all(np.isfinite(hi))) or np.any(hi < lo):
+        return lo, hi
+    a_lo, a_hi = element_box(geo, kb)
+    lo, hi = np.where(np.isfinite(lo), lo, a_lo), np.where(np.isfinite(hi), hi, a_hi)
     if (np.all(np.isfinite(lo)) and np.all(np.isfinite(hi))) or np.any(hi < lo):
         return lo, hi
     if bounds is None:
@@ -417,8 +496,16 @@ def element_box(geo, kb: int) -> tuple[np.ndarray, np.ndarray]:
 
 def element_extent(geo, tracer, kb: int, fallback: tuple[np.ndarray, np.ndarray]
                    ) -> tuple[np.ndarray, np.ndarray]:
-    """Caja [lo, hi] del cuerpo o módulo ``kb`` (con todo lo que tiene dentro)."""
+    """Caja [lo, hi] del cuerpo o módulo ``kb`` (con todo lo que tiene dentro): la exacta (``exact_element_box``) y,
+    en los ejes que sus superficies no acotan, la de los rayos (paso 2, dentro de ``fallback``: la escena)."""
+    e_lo, e_hi = exact_element_box(geo, kb)
+    if np.all(np.isfinite(e_lo)) and np.all(np.isfinite(e_hi)) and np.all(e_hi >= e_lo):
+        lo, hi = _with_ct(geo, kb, e_lo, e_hi)
+        size = float(np.max(hi - lo)) or 1.0
+        return snap(lo, size), snap(hi, size)
     a_lo, a_hi = element_box(geo, kb)
+    if np.all(e_hi >= e_lo):
+        a_lo, a_hi = np.where(np.isfinite(e_lo), e_lo, a_lo), np.where(np.isfinite(e_hi), e_hi, a_hi)
     f_lo, f_hi = (np.asarray(v, dtype=float) for v in fallback)
     lo = np.where(np.isfinite(a_lo), a_lo, f_lo)
     hi = np.where(np.isfinite(a_hi), a_hi, f_hi)
@@ -431,8 +518,11 @@ def element_extent(geo, tracer, kb: int, fallback: tuple[np.ndarray, np.ndarray]
         visible[k] = 1
     size = float(np.max(hi - lo)) or 1.0
     out_lo, out_hi = lo.copy(), hi.copy()
+    have = bool(np.all(e_hi >= e_lo))
     for axis in range(3):
         for sign in (1, -1):
+            if have and np.isfinite(e_hi[axis] if sign > 0 else e_lo[axis]):
+                continue  # (el exacto: los rayos se quedaban cortos con lo fino o inclinado)
             val = _support(tracer, visible, lo, hi, axis, sign)
             if val is None:
                 continue
@@ -446,17 +536,22 @@ def element_extent(geo, tracer, kb: int, fallback: tuple[np.ndarray, np.ndarray]
                 out_hi[axis] = val
             else:
                 out_lo[axis] = val
-    ct = getattr(geo, "ct_body", None)
-    if ct is not None and ct in solid_bodies(geo, kb):
-        # Los rayos atraviesan los vóxeles vacíos (material 0), pero la caja CT ocupa entera su caja: pegar
-        # algo al CT es pegarlo a sus caras, no al contorno del paciente.
-        c_lo, c_hi = analytic_box(geo, ct)
-        if np.all(np.isfinite(c_lo)) and np.all(np.isfinite(c_hi)):
-            out_lo, out_hi = np.minimum(out_lo, c_lo), np.maximum(out_hi, c_hi)
+    out_lo, out_hi = _with_ct(geo, kb, out_lo, out_hi)
     # Un cuerpo sin cota que en esa sección está fuera de la caja de partida: los rayos de un lado lo encuentran
     # más allá del otro. La caja no puede quedar del revés.
     out_lo, out_hi = np.minimum(out_lo, out_hi), np.maximum(out_lo, out_hi)
     return snap(out_lo, size), snap(out_hi, size)
+
+
+def _with_ct(geo, kb: int, lo: np.ndarray, hi: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Con la caja CT dentro: entera. Los rayos atraviesan los vóxeles vacíos (material 0), pero la caja CT ocupa
+    entera su caja: pegar algo al CT es pegarlo a sus caras, no al contorno del paciente."""
+    ct = getattr(geo, "ct_body", None)
+    if ct is not None and ct in solid_bodies(geo, kb):
+        c_lo, c_hi = analytic_box(geo, ct)
+        if np.all(np.isfinite(c_lo)) and np.all(np.isfinite(c_hi)):
+            lo, hi = np.minimum(lo, c_lo), np.maximum(hi, c_hi)
+    return lo, hi
 
 
 SOURCE_SAMPLES = 60_000  # puntos al azar en cada búsqueda (LOCATE: menos de 1 µs cada uno en el adulto)
@@ -467,24 +562,29 @@ SOURCE_FACE = (0.1, 0.01, 0.001)  # franjas por fuera de cada cara, en toda su s
 
 
 def locate_bound(geo, kb: int) -> tuple[np.ndarray, np.ndarray]:
-    """Cota de lo que LOCATE puede situar en ``kb``: la analítica del cuerpo dentro de las de los módulos que lo
+    """Cota de lo que LOCATE puede situar en ``kb``: la caja exacta del cuerpo dentro de las de los módulos que lo
     contienen (LOCATE solo baja a un módulo desde dentro de él). Puede tener infinitos; lo > hi: vacío.
 
     La raíz (el módulo de arriba cuando PENGEOM no añade la envolvente, o la envolvente) no cuenta: es donde LOCATE
     empieza y no mira sus superficies antes de buscar en sus hijas (una hija que asoma fuera del módulo raíz, en una
     geometría mal hecha, se encuentra igual fuera)."""
-    lo, hi = analytic_box(geo, kb)
-    lo, hi = lo.copy(), hi.copy()
-    seen = {kb}
-    m = geo.body(kb).mother
-    while m and 1 <= m <= geo.nbodys and m not in seen:
-        seen.add(m)
-        b = geo.body(m)
-        if b.origin != "enclosure" and b.mother and 1 <= b.mother <= geo.nbodys:
-            m_lo, m_hi = analytic_box(geo, m)
-            lo, hi = np.maximum(lo, m_lo), np.minimum(hi, m_hi)
-        m = b.mother
-    return lo, hi
+    cache = getattr(geo, "_argus_locate_bounds", None)
+    if cache is None:
+        cache = {}
+        _keep(geo, "_argus_locate_bounds", cache)
+    if kb not in cache:
+        # La caja exacta de sus superficies (``exact_box``; hasta 0.17.2, la intersección de las cajas de cada
+        # superficie, infinita en cuanto una estaba girada) dentro de la de su módulo.
+        lo, hi = exact_box(geo, kb)
+        m = geo.body(kb).mother
+        if m and 1 <= m <= geo.nbodys and m != kb:
+            b = geo.body(m)
+            if b.origin != "enclosure" and b.mother and 1 <= b.mother <= geo.nbodys:
+                m_lo, m_hi = locate_bound(geo, m)
+                lo, hi = np.maximum(lo, m_lo), np.minimum(hi, m_hi)
+        cache[kb] = (lo, hi)
+    lo, hi = cache[kb]
+    return lo.copy(), hi.copy()
 
 
 def source_extent(geo, kb: int, bounds, n: int = SOURCE_SAMPLES, seed: int = 0
@@ -569,6 +669,12 @@ def source_extent(geo, kb: int, bounds, n: int = SOURCE_SAMPLES, seed: int = 0
         if level == len(levels) - 1:
             return None, None, "vacío"
         level += 1
+    if np.all(fin_lo) and np.all(fin_hi):
+        # La cota es exacta (``locate_bound``: las superficies del cuerpo y de sus módulos a la vez) y el cuerpo
+        # existe: esa es la caja (si sus limitantes le quitan un extremo, algo mayor que él; nunca menor: el
+        # muestreo se quedaba corto con lo fino, una lámina inclinada de 0,9 µm dejaba fuera el 64 %).
+        size = float(np.max(a_hi - a_lo)) or 1.0
+        return snap(a_lo, size), snap(a_hi, size), "ok"
     b_lo, b_hi = hits.min(axis=0), hits.max(axis=0)
     u_lo, u_hi = np.minimum(u_lo, b_lo), np.maximum(u_hi, b_hi)
     faces = [(i, s) for i in range(3) for s in (1, -1)]

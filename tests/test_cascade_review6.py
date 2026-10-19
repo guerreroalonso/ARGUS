@@ -281,23 +281,27 @@ def _psf(path: Path, n_showers: int) -> list[str]:
 
 
 def test_the_phase_space_showers_are_read_like_penhmain(tmp_path):
+    """(Desde 0.17.3, las lluvias de cada ejecución son grupos del fichero: ver test_review11_cascade.)"""
     p = tmp_path / "a.psf"
     lines = _psf(p, 30)
     found = cs.read_psf_showers([p], 10)
     # N: suma de los NSHI; la 7.ª tiene NSHI 2 (una lluvia sin partículas antes).
     assert [s.n for s in found] == [1, 2, 3, 4, 5, 6, 8, 9, 10]
     assert [len(s.lines) for s in found][4] == 2  # la 5.ª, con dos partículas
-    per, parts = cs.split_psf(cs.read_psf_showers([p], 1000), [10, 10, 10])
-    assert per == [10, 10, 10]
-    assert parts[0][-1].n == 10 and parts[1][0].n == 11 and parts[1][-1].n >= 20
+    assert [s.n for s in cs.read_psf_showers([p], groups=10)] == [1, 2, 3, 4, 5, 6, 8, 9, 10, 11]
+    parts = cs.split_psf(cs.read_psf_showers([p]), 10)
+    # La 3.ª empieza con NSHI 2 (la 21.ª): su 9.ª lluvia acaba con N = 11 > 10 y la 30.ª ya no tendría trayectorias.
+    assert [len(g) for g in parts] == [10, 10, 9, 1]
+    assert parts[0][-1].n == 11 and parts[1][0].n == 12
+    assert [cs.psf_nsimsh(parts, k) for k in range(4)] == [11, 11, 11, 1]  # (el N de cada una, desde la anterior)
     # Si el fichero no tiene tantas, menos ejecuciones.
-    per, parts = cs.split_psf(cs.read_psf_showers([p], 1000), [20, 20, 20])
-    assert len(per) == 2 and sum(per) <= 40
+    assert len(cs.split_psf(cs.read_psf_showers([p]), 20)) == 2
     assert cs.psf_record("# comentario") is None and cs.psf_record(lines[0])[0] == 2
 
 
 def test_each_run_reads_its_own_phase_space_showers(tmp_path):
-    """Antes, cada ejecución leía el espacio de fases desde el principio: las mismas primarias en todas."""
+    """Antes, cada ejecución leía el espacio de fases desde el principio: las mismas primarias en todas. (Desde
+    0.17.3, la primera también lee su trozo y las lluvias son grupos.)"""
     in_path, doc = _case(tmp_path)
     lines = _psf(in_path.parent / "fase.psf", 200)
     d = parse_in_text(write_in_text(doc), doc.path)
@@ -309,21 +313,24 @@ def test_each_run_reads_its_own_phase_space_showers(tmp_path):
     assert doc.model.source.from_psf
     exe = _fake(tmp_path)
     plan = cs.plan_cascade(in_path, doc, exe, showers=120, cap=50)
-    assert [r.showers for r in plan.runs] == [50, 50, 20]
-    assert sc.psf_files(plan.docs[0]) == ["fase.psf"] and plan.chunks[0] is None
-    assert all(sc.psf_files(d) == [cs.PSF_CHUNK] for d in plan.docs[1:])
-    chunk = plan.chunks[1].decode("latin-1").splitlines()
-    body = [ln for ln in chunk if not ln.startswith("#")]
-    parts = cs.split_psf(cs.read_psf_showers([in_path.parent / "fase.psf"], 120), [50, 50, 20])[1]
-    assert parts[0][-1].n >= 50 and parts[1][0].n == parts[0][-1].n + 1  # sigue donde acaba la 1.ª
-    assert body == [ln for g in parts[1] for ln in g.lines] and body[0] in lines  # tal cual
-    assert not any(it.kind == "psf" for it in plan.files[1].items)
+    parts = cs.split_psf(cs.read_psf_showers([in_path.parent / "fase.psf"], groups=120), 50)
+    assert [r.groups for r in plan.runs] == [len(g) for g in parts] and sum(r.groups for r in plan.runs) == 120
+    assert [r.showers for r in plan.runs] == [cs.psf_nsimsh(parts, k) for k in range(len(parts))]
+    assert all(sc.psf_files(d) == [cs.PSF_CHUNK] for d in plan.docs)
+    for k, chunk in enumerate(plan.chunks):
+        body = [ln for ln in chunk.decode("latin-1").splitlines() if not ln.startswith("#")]
+        assert body == [ln for g in parts[k] for ln in g.lines]  # tal cual
+    assert body[0] in lines
+    assert parts[1][0].n == parts[0][-1].n + 1  # sigue donde acaba la 1.ª
+    assert not any(it.kind == "psf" for fp in plan.files for it in fp.items)
     cs.write_cascade(plan)
     assert (plan.folder / "run-02" / cs.PSF_CHUNK).read_bytes() == plan.chunks[1]
-    # Lo que lee el visor: las lluvias de cada ejecución en su fichero (en la 2.ª, desde la 51).
-    src = sh.run_source(plan.folder / "run-02", "caja.in", 50)
-    assert src.pieces and src.n_showers == len(cs.read_psf_showers([plan.folder / "run-02" / cs.PSF_CHUNK], 50))
+    # Lo que lee el visor: las lluvias de cada ejecución en su fichero (en la 2.ª, desde la siguiente).
+    r2 = plan.runs[1]
+    src = sh.run_source(plan.folder / "run-02", "caja.in", r2.showers)
+    assert src.pieces and src.n_showers == r2.groups
     assert src.particles[0][2] == pytest.approx(cs.psf_record(parts[1][0].lines[0])[2]) and src.particles[0][5] == 0
+    assert cs.run_counts(cs.read_manifest(plan.folder)) == [r.groups for r in plan.runs]
 
 
 # -- reconstrucción con fuentes radiactivas ---------------------------------------------------------------------------

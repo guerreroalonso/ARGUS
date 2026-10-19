@@ -208,10 +208,12 @@ def test_with_resume_and_its_dump_nothing_is_asked(tmp_path):
     _copy_outputs(folder)
     from test_simcheck import dump_text
 
-    (folder / "dump.dmp").write_text(dump_text())  # un volcado de penhmain que se puede seguir
     text = in_path.read_text(encoding="latin-1").rstrip("\r\n") + "\r\nRESUME dump.dmp\r\n"
     in_path.write_text(text, encoding="latin-1")
     doc2 = parse_in_file(in_path)
+    # Un volcado de penhmain que se puede seguir: el de este .in (su título; con otro, penhmain se detiene: duodécima
+    # revisión) y a medias (con todas las lluvias de NSIMSH, penhmain solo reescribe los resultados).
+    (folder / "dump.dmp").write_text(dump_text(title=doc2.model.title, showers=1000.0))
     plan = rn.plan_run(in_path, doc2, penhmain=_fake_penhmain(tmp_path / "p"), launch_fn=native)
     assert plan.resume == "dump.dmp" and plan.previous == []
     (folder / "dump.dmp").unlink()

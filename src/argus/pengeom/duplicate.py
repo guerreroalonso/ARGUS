@@ -93,17 +93,12 @@ _copy_surface = copy_surface  # la copia de una superficie está en placement (t
 
 
 def _own_box(geo: CompiledGeometry, kb: int):
-    """Caja de las superficies propias del cuerpo, sin la esfera de la envolvente (que acota a todos)."""
-    from .extent import halfspace_box
+    """Caja de lo que está dentro de las superficies propias del cuerpo o módulo, sin la esfera de la envolvente (que
+    acota a todos): la exacta (``extent.exact_box``; hasta 0.17.2, la de cada superficie, que con un cilindro girado
+    es infinita: «no es un volumen cerrado»)."""
+    from .extent import exact_box
 
-    lo = np.full(3, -np.inf)
-    hi = np.full(3, np.inf)
-    for ks, side in geo.body(kb).own_surfaces():
-        if geo.surface(ks).origin == "enclosure":
-            continue
-        l2, h2 = halfspace_box(geo.surface(ks).q, side)
-        lo, hi = np.maximum(lo, l2), np.minimum(hi, h2)
-    return lo, hi
+    return exact_box(geo, kb)
 
 
 def _element_of(geo: CompiledGeometry, kb: int) -> Element:
@@ -122,11 +117,13 @@ class _Tree:
         if contains_ct(geo, kb):
             raise EditError("Contiene la caja CT y PENGEOM admite un solo CT: no se puede duplicar.")
         top = _element_of(geo, kb)
-        if isinstance(top, BodyElement):
-            lo, hi = _own_box(geo, kb)
-            if not (np.all(np.isfinite(lo)) and np.all(np.isfinite(hi))):
-                raise EditError(f"{body_title(geo, kb)} no es un volumen cerrado (sus superficies no lo acotan): "
-                                "no se puede duplicar.")
+        # Un cuerpo o un módulo que sus superficies no cierran no se puede copiar: las copias, desplazadas, podrían
+        # quedar encima de otras cosas fuera de lo que se comprueba (hasta 0.17.2, un módulo abierto sí se dejaba).
+        lo, hi = _own_box(geo, kb)
+        if not (np.all(np.isfinite(lo)) and np.all(np.isfinite(hi))):
+            kind = "un volumen cerrado" if not geo.body(kb).is_module else "un módulo cerrado"
+            raise EditError(f"{body_title(geo, kb)} no es {kind} (sus superficies no lo acotan): no se puede "
+                            "duplicar.")
         stars = starred_surfaces(geo, kb)
         if stars:
             raise EditError(f"Usa superficies SURFACE* (n.º {', '.join(map(str, stars[:5]))}), que no se mueven: "

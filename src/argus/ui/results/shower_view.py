@@ -96,11 +96,20 @@ class CascadeData:
     done: int = 0  # lluvias de las ejecuciones terminadas (y de las que se sabe la lluvia de cada trayectoria)
     total: int = 0  # lluvias pedidas
     unverified: int = 0  # lluvias simuladas de las que aún no se sabe la lluvia de cada trayectoria (faltan cortes)
+    untracked: list[str] = field(default_factory=list)  # ejecuciones terminadas sin ninguna trayectoria (sin .trk)
 
     @property
     def key(self) -> tuple:
         return (os.path.normcase(str(self.folder)), os.path.normcase(str(self.in_path)),
                 os.path.normcase(str(self.info.path)) if self.info is not None else None)
+
+
+def _untracked_text(runs: list[str]) -> str:
+    """« run-01 y run-02 han terminado sin ninguna trayectoria (ningún .trk)…»."""
+    names = ", ".join(runs[:3]) + ("…" if len(runs) > 3 else "")
+    verb = "ha terminado" if len(runs) == 1 else "han terminado"
+    return (f"{names} {verb} sin ninguna trayectoria (ningún .trk): se han borrado o el penhmain no escribe las de "
+            "LTRACK.")
 
 
 def source_description(doc) -> tuple[int | None, str]:
@@ -154,6 +163,14 @@ def cascade_stale(info: cs.CascadeInfo, in_path: Path | None, exe: Path | None, 
     except (OSError, ValueError):
         return None
     if not same:
+        try:
+            old_psf = cs.psf_counted_in_n(info, in_path, doc, exe)
+        except (OSError, ValueError):
+            old_psf = False
+        if old_psf:
+            return ("Esta cascada se simuló con un ARGUS anterior, que con un espacio de fases pedía las lluvias de "
+                    "penhmain (su N, que cuenta también las que no llegaron al fichero) y salían menos de las pedidas: "
+                    "simúlela de nuevo para tener las que se piden.")
         return ("El caso ha cambiado después de simular esta cascada (el .in, la geometría, los materiales o "
                 "penhmain): simúlela de nuevo para ver la de ahora.")
     return None
@@ -195,6 +212,7 @@ def load_cascade_data(folder: str | os.PathLike, in_path: str | os.PathLike | No
     with keep_cascade(info.path):  # (se recorren sus ejecuciones tres veces: que no se expulsen entre medias)
         data.done, data.total, _states = cs.cascade_progress(info)
         data.unverified = cs.unverified_showers(info)
+        data.untracked = cs.untracked_runs(info)
         s = load_cascade(info, data.primary)
     if s.count:
         data.showers = s
@@ -921,6 +939,7 @@ class ShowerView(QWidget):
                     f"{_fmt_int(d.total)}).</p>"
                     + (f"<p>penhmain ha simulado {_fmt_int(d.unverified)}, pero aún no se sabe de qué lluvia es cada "
                        "trayectoria: falta repetir esas ejecuciones parando antes.</p>" if d.unverified else "")
+                    + (f"<p>{_untracked_text(d.untracked)}</p>" if d.untracked else "")
                     + f"<p>«Simular la cascada» con {_fmt_int(d.info.showers)} lluvias la termina.</p>")
         else:
             text = ("<p><b>Cascada de partículas</b></p>"
@@ -1040,7 +1059,7 @@ class ShowerView(QWidget):
         if d is not None and len(d.cascades) > 1:
             for info in d.cascades:
                 when = time.strftime("%d/%m/%Y %H:%M", time.localtime(info.created)) if info.created else ""
-                self.which.addItem(f"{info.path.name} ({_fmt_int(info.showers)} lluvias, {when})", str(info.path))
+                self.which.addItem(f"{info.path.name} ({plural(info.showers, 'lluvia')}, {when})", str(info.path))
                 if d.info is not None and os.path.normcase(str(info.path)) == os.path.normcase(str(d.info.path)):
                     self.which.setCurrentIndex(self.which.count() - 1)
         self.which.setVisible(self.which.count() > 1)
@@ -1067,20 +1086,31 @@ class ShowerView(QWidget):
             else:
                 when = time.strftime("%d/%m/%Y %H:%M", time.localtime(d.info.created)) if d.info.created else ""
                 runs = len(d.info.runs)
-                text = (f"Cascada «{d.info.path.name}»: {_fmt_int(d.done)} de {_fmt_int(d.total)} lluvias simuladas "
+                done = "lluvia simulada" if d.total == 1 else "lluvias simuladas"
+                text = (f"Cascada «{d.info.path.name}»: {_fmt_int(d.done)} de {_fmt_int(d.total)} {done} "
                         f"con {d.info.exe or 'penhmain'} ({runs} {'ejecución' if runs == 1 else 'ejecuciones'}"
                         + (f", {when}" if when else "") + ").")
+                if all(r.groups is not None for r in d.info.runs):  # (en las de 0.17.2, las pedidas eran otras)
+                    text += cs.psf_short_note(d.total, d.info.showers)
+                if d.untracked:
+                    text += " " + _untracked_text(d.untracked) + " «Simular…» las repite."
+                    style = "color: #b8860b;"
                 if d.unverified:
                     text += (f" De {plural(d.unverified, 'lluvia')} aún no se sabe de qué lluvia es cada trayectoria "
                              "(penhmain tiene que repetir esas ejecuciones parando antes): «Simular…» lo termina.")
                     style = "color: #b8860b;"
-                elif d.done < d.total:
+                elif d.done < d.total and not d.untracked:
                     text += " A medias: «Simular…» la termina."
                     style = "color: #b8860b;"
                 if d.showers is not None and d.showers.orphans:
                     n = d.showers.orphans
                     text += (f" {plural(n, 'trayectoria')} sin madre reconocida "
                              + ("(cuenta como primaria)." if n == 1 else "(cuentan como primarias)."))
+                bad = d.showers.bad_points if d.showers is not None else 0
+                if bad:
+                    text += (f" {plural(bad, 'punto')} de los .trk no " + ("es válido" if bad == 1 else "son válidos")
+                             + " (NaN, infinito o a más de 10¹⁰ cm: el fichero está dañado): sus tramos no se dibujan.")
+                    style = "color: #b8860b;"
         if d is not None and d.stale and not running:
             text = d.stale + (" " + text if text else "")
             style = "color: #b8860b;"
@@ -1595,14 +1625,36 @@ class ShowerView(QWidget):
         self.status.setText(f"Animación guardada en {path} ({plural(count, 'imagen', 'imágenes')}, {secs} s).")
 
     # -- para la ventana de resultados -------------------------------------------------------------------------
-    def visible_tracks(self) -> list[Tracks]:
-        """Las trayectorias que se ven (lluvias y partículas elegidas), para dibujarlas sobre los cortes 2D."""
+    def visible_tracks(self, max_points: int | None = None) -> list[Tracks]:
+        """Las trayectorias que se ven (lluvias y partículas elegidas), para dibujarlas sobre los cortes 2D. Con
+        ``max_points``, las de las primeras lluvias enteras que caben (al menos una): la lista dice cuáles en
+        ``note``. Hasta 0.17.2 los cortes y la vista 3D de la ventana principal repartían sus puntos por tipo de
+        partícula: con 1000 lluvias, fotones de casi todas y electrones de las 46 primeras, sin decirlo."""
+        from ...results.data import TrackList
+
         d = self.data
         if d is None or d.showers is None:
             return []
         lo, hi = self._shower_range()
         parts = set(ALL_PARTICLES - self._particles_off) if self._particles_off else None
-        return d.showers.subset(range(lo, hi), parts).to_tracks()
+        s = d.showers
+        out = TrackList(s.subset(range(lo, hi), parts).to_tracks())
+        total = sum(len(t.points) for t in out)
+        if max_points is None or total <= max_points or hi - lo <= 1:
+            return out
+        keep = (s.shower >= lo) & (s.shower < hi)
+        if parts is not None:
+            keep &= np.isin(s.particle, list(parts))
+        idx = np.flatnonzero(keep)
+        per = np.bincount(s.shower[idx] - lo, weights=s.lengths()[idx], minlength=hi - lo)
+        k = max(1, int(np.searchsorted(np.cumsum(per), max_points, side="right")))
+        if k >= hi - lo:
+            return out
+        out = TrackList(s.subset(range(lo, lo + k), parts).to_tracks())
+        out.note = (f"las lluvias {fmt_int(lo + 1)}–{fmt_int(lo + k)} de las {fmt_int(hi - lo)} que se ven en la "
+                    "cascada (no caben más)" if k > 1 else
+                    f"la lluvia {fmt_int(lo + 1)} de las {fmt_int(hi - lo)} que se ven en la cascada (no caben más)")
+        return out
 
     def table_rows(self) -> tuple[list[str], list[np.ndarray]]:
         """Una fila por trayectoria de las lluvias que se ven: lluvia, partícula, generación, madre, principio y

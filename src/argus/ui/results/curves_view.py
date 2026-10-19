@@ -310,6 +310,11 @@ class CurvesView(QWidget):
                 ax.stairs(y + k * s.err, s.edges, baseline=y - k * s.err, fill=True, color=color, alpha=BAND_ALPHA,
                           lw=0)
             return
+        if len(y) == 1:  # un punto (p. ej. una curva de un solo intervalo de anchura desconocida): con su marca
+            ax.plot(s.x, y, "o", color=color, label=label, ms=5)
+            if s.err is not None and k > 0:
+                ax.errorbar(s.x, y, yerr=k * np.asarray(s.err), fmt="none", ecolor=color, elinewidth=1, capsize=3)
+            return
         ax.plot(s.x, y, color=color, label=label, linestyle=ls)
         if s.err is not None and k > 0:
             ax.fill_between(s.x, y - k * s.err, y + k * s.err, color=color, alpha=BAND_ALPHA, lw=0)

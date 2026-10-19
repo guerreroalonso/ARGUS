@@ -56,6 +56,8 @@ from .simfolder import SimPlan, classify, plan_folder
 RUN_OUTPUT = "penhmain.out"  # la salida en pantalla (el mismo nombre que en las simulaciones en paralelo)
 RUN_LOG = "argus-ejecutar.log"  # sin terminal: lo que escribe el guion
 DEFAULT_DUMP = "dump.dmp"  # el volcado de penhmain sin DUMPTO (penhmain.f)
+RUN_LOG_PENHMAIN = "penhmain.dat"  # el registro de penhmain (con un IRETRN, acaba con «IRETRN = n»)
+STOPPED_TEXT = "ARGUS: penhmain se ha detenido: mire arriba el motivo y el IRETRN (no ha terminado la simulacion)."
 # Palabras clave con el nombre de un fichero que escribe penhmain (además de los de nombre fijo).
 OUTPUT_NAME_KEYWORDS = ("IDSPC", "IDPSF", "IDFLNC", "IDAGEF", "ADSPC", "EDSPC")
 LAUNCHER_STEM = "argus-ejecutar"
@@ -388,9 +390,13 @@ class RunPlan:
     exe: ExeChoice
     previous: list[Path] = field(default_factory=list)
     resume: str | None = None  # RESUME con su volcado en la carpeta: penhmain sigue la simulación anterior
-    resume_missing: str | None = None  # RESUME sin un volcado que se pueda seguir: penhmain empieza desde cero
+    resume_missing: str | None = None  # RESUME sin volcado (no existe, está vacío…): penhmain empieza desde cero
     resume_note: str = ""  # por qué («no existe», «está vacío»…)
     resume_diffs: list[str] = field(default_factory=list)  # rejillas e intervalos del volcado que no son los del .in
+    # Duodécima revisión: lo mismo que dicen los mensajes (``resume.resume_outcome``).
+    resume_done: str = ""  # la simulación guardada ya está terminada (por qué): penhmain solo reescribe los resultados
+    resume_error: str = ""  # RESUME con un volcado con el que penhmain se detendría: «dump.dmp está dañado: …»
+    hard: list[str] = field(default_factory=list)  # lo que destruiría un fichero del usuario: no se puede forzar
     running: str | None = None  # penhmain parece estar simulando ya en esta carpeta
     notes: list[str] = field(default_factory=list)
     shell: str | None = None  # Windows: SHELL_LINUX (WSL) o SHELL_WINDOWS (cmd); None: el de siempre
@@ -444,7 +450,7 @@ class RunPlan:
 
     def problems_with(self, exe: ExeChoice) -> list[str]:
         """Lo que impide ejecutar con el penhmain ``exe`` (en un conflicto, el de la carpeta o el elegido)."""
-        out = []
+        out = list(self.hard)
         p = exe.problem
         if p:
             out.append(p)
@@ -489,31 +495,49 @@ def plan_run(in_path: str | os.PathLike, doc: InDocument, *, penhmain: str | os.
     files = plan_folder(in_path, doc, folder, database=database, extra_dirs=extra_dirs, endf_dir=endf_dir,
                         linux=linux)
     plan = RunPlan(in_path, folder, files, exe)
-    line = doc.first("RESUME")
-    raw = line.text.rstrip() if line is not None else ""
-    res = raw.strip()
-    if res and raw[:1].isspace():
-        # penhmain abre el nombre con el blanco del principio: no encuentra el volcado, empieza desde cero y
-        # sobrescribe los resultados anteriores (se ofrecen para guardarlos). Es un problema (``name_problems``).
-        plan.resume_missing = res
-        plan.resume_note = "no se encontraría (el nombre empieza por un espacio)"
-    elif res:
-        from .dumpfile import read_dump, tally_differences
+    from . import resume as rs
 
-        # Un volcado vacío («Empty.»: penhmain lo deja así si no había nada que seguir) o dañado no se sigue: penhmain
-        # empieza desde cero y sobrescribe los resultados anteriores (se guardan en «anterior-…»).
-        info = read_dump(folder / res.replace("\\", "/"))
-        if info.usable:
-            plan.resume = res
-            plan.resume_diffs = tally_differences(info, doc)  # penhmain sigue con los del volcado
-        else:
-            plan.resume_missing = res
-            plan.resume_note = {"missing": "no existe", "empty": "está vacío"}.get(
-                info.state, "está dañado o incompleto")
+    # Lo mismo que dicen los mensajes del .in (``resume.resume_outcome``): solo sin volcado empieza desde cero; con uno
+    # dañado, de otro título, que es una carpeta… penhmain se detiene, y con otra cosa (un .mat, el .in) la destruye.
+    out = rs.resume_outcome(doc, folder)
     inputs = _input_names(files)
+    if out is not None:
+        res = out.shown
+        if out.blank:
+            # penhmain abre el nombre con el blanco del principio: no encuentra el volcado, empieza desde cero y
+            # sobrescribe los resultados anteriores. Es un problema (``name_problems``: no se puede ejecutar), y el
+            # volcado que se quería seguir no es un resultado anterior que mover.
+            plan.resume_missing = res
+            plan.resume_note = "no se encontraría (el nombre empieza por un espacio)"
+        elif out.action == rs.CONTINUE:
+            plan.resume = res
+            plan.resume_diffs = out.tallies  # penhmain sigue con los del volcado
+        elif out.action == rs.DONE:
+            plan.resume = res
+            plan.resume_done = out.why
+            plan.resume_diffs = out.tallies
+        elif out.action == rs.FRESH:
+            plan.resume_missing = res
+            plan.resume_note = out.why
+        elif out.action == rs.DESTROY:
+            plan.resume_error = (f"{res} {out.why}: penhmain escribiría «Empty.» encima (se perdería) y empezaría "
+                                 "desde cero")
+            plan.hard.append(f"RESUME: {res} {out.why} (penhmain escribiría «Empty.» encima): ponga el nombre del "
+                             "volcado")
+        else:
+            plan.resume_error = f"{res} {out.why}: penhmain se detendría" + (f" (IRETRN {out.code})" if out.code
+                                                                              else "")
     if exe.target is not None:
         inputs.add(_rel_key(exe.target.name))
-    if plan.resume is None:
+    dump_in = set(inputs)
+    res_name = rs.open_name(doc, "RESUME")
+    if res_name is not None:
+        dump_in.discard(_rel_key(res_name))  # el volcado que se sigue se lee y se escribe
+    target = rs.dump_target(doc, folder, dump_in)
+    if target is not None and target.problem and target.problem.startswith("es uno de los ficheros que lee"):
+        what = f"DUMPTO {target.shown}" if target.explicit else f"el volcado ({target.shown}, sin DUMPTO)"
+        plan.hard.append(f"{what} es uno de los ficheros que lee penhmain: escribiría el volcado encima")
+    if plan.resume is None and not plan.resume_error:
         plan.previous = previous_outputs(folder, doc, inputs)
     plan.running = running_state(folder, in_path=in_path)
     plan.notes += files.notes
@@ -571,12 +595,16 @@ def launcher_kind(info: ExeInfo | None, host: str = HOST, shell: str | None = No
 ERROR_MARK = "ARGUS: penhmain ha terminado con el codigo de salida"  # en penhmain.out (results.folder.log_error)
 
 
-def launcher_text(kind: str, in_name: str, exe_name: str, windows_exe: bool = False) -> str:
+def launcher_text(kind: str, in_name: str, exe_name: str, windows_exe: bool = False, iretrn: bool = True) -> str:
     """El guion que ejecuta ``exe_name < in_name`` en su carpeta, dice si penhmain ha acabado con un error y espera al
     final. El .bat va en UTF-8 con «chcp 65001» (cmd.exe lee cada línea con la página de códigos de la consola: con la
     OEM, 850 en español, un nombre con tildes no llegaría bien); lo que escribe ARGUS, sin tildes (las consolas no
     siempre las muestran bien). ``windows_exe``: el guion de sh ejecuta un penhmain de Windows (en el terminal de Linux
-    de WSL): WSL le pasa GFORTRAN_UNBUFFERED_PRECONNECTED si está en WSLENV."""
+    de WSL): WSL le pasa GFORTRAN_UNBUFFERED_PRECONNECTED si está en WSLENV.
+
+    Con un IRETRN (el .in, el volcado de RESUME…), penhmain escribe el motivo y «IRETRN = n» y acaba con el código 0:
+    el guion lo busca en la salida en pantalla (en Windows, en penhmain.dat) para no decir que ha terminado bien
+    (duodécima revisión). ``iretrn=False``: el guion de antes (hasta 0.17.3), para reconocerlo sin retocar."""
     if kind == "bat":
         return "\r\n".join([
             "@echo off",
@@ -591,8 +619,10 @@ def launcher_text(kind: str, in_name: str, exe_name: str, windows_exe: bool = Fa
             "set ARGUS_RC=%errorlevel%",
             "echo.",
             'if not "%ARGUS_RC%"=="0" goto argus_error',
+            *([f'findstr /c:"IRETRN =" {RUN_LOG_PENHMAIN} >nul 2>&1 && goto argus_stopped'] if iretrn else []),
             "echo ARGUS: penhmain ha terminado; los resultados estan en esta carpeta.",
             "goto argus_end",
+            *([":argus_stopped", f"echo {STOPPED_TEXT}", "goto argus_end"] if iretrn else []),
             ":argus_error",
             "echo ARGUS: penhmain ha terminado con un error (codigo %ARGUS_RC%): mire los mensajes de arriba.",
             ":argus_end",
@@ -622,7 +652,9 @@ def launcher_text(kind: str, in_name: str, exe_name: str, windows_exe: bool = Fa
         'argus_rc=$(cat "$argus_rc_file" 2>/dev/null || echo 0)',
         'rm -f "$argus_rc_file"',
         "echo",
-        'if [ "$argus_rc" = "0" ]; then',
+        *(['if [ "$argus_rc" = "0" ] && grep -q "IRETRN =" ' + RUN_OUTPUT + ' 2>/dev/null; then',
+           f"  echo '{STOPPED_TEXT}'",
+           'elif [ "$argus_rc" = "0" ]; then'] if iretrn else ['if [ "$argus_rc" = "0" ]; then']),
         "  echo 'ARGUS: penhmain ha terminado; los resultados estan en esta carpeta.'",
         "else",
         '  echo "ARGUS: penhmain ha terminado con un error (codigo $argus_rc): mire los mensajes de arriba."',
@@ -698,8 +730,8 @@ def _launcher_like(data: bytes, kind: str) -> bool:
         found = [(exe.replace("%%", "%"), name.replace("%%", "%")) for exe, name in _BAT_RUN.findall(text)]
     else:
         found = [(exe.replace("'\\''", "'"), name.replace("'\\''", "'")) for exe, name in _SH_RUN.findall(text)]
-    return any(launcher_text(kind, in_name, exe_name, windows_exe).replace("\r\n", "\n") == text
-               for exe_name, in_name in found for windows_exe in (False, True))
+    return any(launcher_text(kind, in_name, exe_name, windows_exe, iretrn).replace("\r\n", "\n") == text
+               for exe_name, in_name in found for windows_exe in (False, True) for iretrn in (True, False))
 
 
 @dataclass

@@ -561,12 +561,19 @@ class RunDialog(QDialog):
         # Linux): hay que cambiarlos en el .in.
         for p in plan.name_problems(self._exe_to_run() or plan.exe):
             parts.append(_span(html.escape(p[:1].upper() + p[1:] + "."), BAD_COLOR))
-        if plan.resume:
+        if plan.resume and plan.resume_done:
+            parts.append(_span(f"RESUME: la simulación guardada en {html.escape(plan.resume)} ya está terminada ("
+                               + html.escape(plan.resume_done) + "): penhmain no simulará ninguna más y volverá a "
+                               "escribir los resultados con el tiempo de cálculo a 0.", WARN_COLOR))
+        elif plan.resume:
             text = f"RESUME: penhmain sigue la simulación guardada en {html.escape(plan.resume)}"
             if plan.resume_diffs:  # con las rejillas y los intervalos del volcado (DOSER, IMDETR…)
-                text += (", con las rejillas y los intervalos de entonces, no con los del .in ("
+                text += (", con las rejillas, los intervalos y los detectores de entonces, no con los del .in ("
                          + html.escape("; ".join(plan.resume_diffs)) + ")")
             parts.append(_span(text + ".", WARN_COLOR))
+        elif plan.resume_error:
+            # Lo mismo que dicen los errores de abajo (duodécima revisión: decía «empieza desde cero»).
+            parts.append(_span(f"RESUME: {html.escape(plan.resume_error)}.", BAD_COLOR))
         elif plan.resume_missing:
             parts.append(f"RESUME: {html.escape(plan.resume_missing)} {html.escape(plan.resume_note or 'no existe')}"
                          ": penhmain empieza desde cero.")

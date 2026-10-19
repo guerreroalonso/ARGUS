@@ -216,7 +216,7 @@ def test_job_section_seeds_and_resume_state(qtbot, window, case_dir):
     (case_dir / "dump1.dmp").write_text("   Empty.\n")
     w.open_file(case_dir / "maniqui.in")
     sec = expand(w, JobSection)
-    assert "no tiene una simulación guardada" in sec.resume_state.text()
+    assert "está vacío: se empieza desde cero" in sec.resume_state.text()
     sec.seed_kind.setCurrentIndex(1)
     sec._on_seed_kind(1)
     qtbot.waitUntil(lambda: sc.seeds(w.input.doc)[-1][0] < 0)

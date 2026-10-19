@@ -46,17 +46,19 @@ CAJA_TALLIES = dict(
     nbangl=(30, 4, False),
     impact=[dict(bins=(70, 1e3, 7e5, False), idcut=1, nage=0),
             dict(bins=(50, 1e3, 7e5, True), idcut=2, nage=50)],
-    angular=[dict(bins=(70, 1e3, 7e5, False), window=(90.0, 180.0, 0.0, 360.0)),
-             dict(bins=(70, 1e3, 7e5, False), window=(0.0, 30.0, 0.0, 360.0))],
+    angular=[dict(bins=(70, 1e3, 7e5, False), window=(90.0, 180.0, 0.0, 360.0), kkad=(1, 1, 1, 1, 1, 1)),
+             dict(bins=(70, 1e3, 7e5, False), window=(0.0, 30.0, 0.0, 360.0), kkad=(0, 1, 0, 0, 0, 0))],  # ADKPAR 2
     deposit=[(140, 0.0, 7e5, False)],
     grid=(1, (11, 11, 25), (-5.0, -5.0, 0.0), (5.0, 5.0, 5.0)),
     epro=True,
 )
 
 
-def full_dump(title: str = "ARGUS corpus: caja", nbody: int = 4, repeat: bool = False, **over) -> str:
+def full_dump(title: str = "ARGUS corpus: caja", nbody: int = 4, repeat: bool = False, rwrite: float = 0.0,
+              **over) -> str:
     """Un volcado entero de penhmain (cabecera, resultados y el principio de la dosis); ``repeat``: los ceros
-    repetidos como «r*0.0», como los escribe ifort."""
+    repetidos como «r*0.0», como los escribe ifort. ``rwrite``: las partículas que lleva escritas el espacio de fases
+    del detector de impacto 1 (IPSF 1 en caja.in; con más de 0, penhmain no puede reanudar: duodécima revisión)."""
     t = {**CAJA_TALLIES, **over}
 
     def zeros(k: int) -> str:
@@ -64,9 +66,10 @@ def full_dump(title: str = "ARGUS corpus: caja", nbody: int = 4, repeat: bool = 
             return f" {k}*0.000000000000000E+000"
         return _reals([0.0] * k)
 
-    lines = [_reals([2.0e4, 12.5, 12.0]), title.ljust(65)[:65], _ints([123456789, 987654321]),
+    # 1e4 lluvias de las 2e4 de caja.in (NSIMSH): una simulación a medias, que penhmain sigue.
+    lines = [_reals([1.0e4, 12.5, 12.0]), title.ljust(65)[:65], _ints([123456789, 987654321]),
              _ints([0]) + _reals([0.0]) + "  F", _ints([2]), _ints([2]) + " F T",
-             _reals([3.2e4, 6.617e5, 6.617e5]), _reals([0.07, 0.851, 0.0]), _reals([1500, 18500, 0.0]),
+             _reals([3.2e4, 6.617e5, 6.617e5]), _reals([0.07, 0.851, 0.0]), _reals([750, 9250, 0.0]),
              _reals([6.617e5, 0, 0, 0, 0, 0, 0]) + _ints([0, 0])]
     lines += [zeros(n) for n in (3, 3, 18, 18, 2, 2, 2, 2, 2, 2, 24, 24, 3, 3)]
     lines.append(_ints([nbody]))
@@ -81,7 +84,7 @@ def full_dump(title: str = "ARGUS corpus: caja", nbody: int = 4, repeat: bool = 
     imp, ang, dep, grid = t["impact"], t["angular"], t["deposit"], t["grid"]
     lines.append(_ints([len(imp), len(ang), len(dep)]) + f" {'T' if grid else 'F'} {'T' if t['epro'] else 'F'} F")
     if imp:
-        lines.append(_reals([5.0, 6.0]))
+        lines.append(_reals([5.0, rwrite]))  # RLAST, RWRITE
         lines.append(_ints([len(imp)]))
         lines += [_reals([1.0] * len(imp))] * 2
         lines.append(_ints([d["idcut"] for d in imp]))
@@ -100,7 +103,7 @@ def full_dump(title: str = "ARGUS corpus: caja", nbody: int = 4, repeat: bool = 
         for i, d in enumerate(ang, start=1):
             n = d["bins"][0]
             lines += [f"spc-angdet-{i:02d}.dat   ", _reals([math.radians(a) for a in d["window"]]),
-                      _ints([1] * 6), _bins(*d["bins"]), zeros(6 * n), zeros(6 * n)]
+                      _ints(d.get("kkad", (1,) * 6)), _bins(*d["bins"]), zeros(6 * n), zeros(6 * n)]
     if dep:
         lines.append(_ints([len(dep)]))
         lines += [_reals([1.0] * len(dep))] * 2
@@ -111,6 +114,11 @@ def full_dump(title: str = "ARGUS corpus: caja", nbody: int = 4, repeat: bool = 
         lines += [_ints(ndb), _reals(dxl), _reals(dxu), _reals([0.5] * 6), _ints([kdose])]
         cells = ndb[0] * ndb[1] * ndb[2]
         lines += [_reals([1.0] * cells), zeros(cells), zeros(cells), zeros(ndb[2]), zeros(ndb[2])]
+    if t["epro"]:  # P3DMD (penhmain.f 10341-10374), en la rejilla de la dosis
+        _kd, ndb, dxl, dxu = grid or (1, (1, 1, 1), (-5.0, -5.0, 0.0), (5.0, 5.0, 5.0))
+        cells = ndb[0] * ndb[1] * ndb[2]
+        lines += [_ints(ndb), _reals(dxl), _reals(dxu), _reals([0.5] * 6), _ints([1, 0]),
+                  _reals([1.0] * cells), zeros(cells), zeros(cells), zeros(ndb[2]), zeros(ndb[2])]
     lines += ["", "   *** END ***"]
     return "\n".join(lines) + "\n"
 
@@ -178,15 +186,18 @@ def test_what_differs_from_the_in_is_said():
     assert out[-1] == "proceso externo (EPROF): el .in lo pide y el volcado no lo tiene"
 
 
-def test_a_dump_that_cannot_be_read_further_says_nothing():
-    """Otra versión de penhmain (otro orden): no se sabe qué rejilla tiene y no se avisa de nada."""
+def test_a_dump_that_cannot_be_read_further_is_damaged():
+    """Un valor que no es un número en los resultados: penhmain 2025 los lee sin ERR= y se detiene con un error de
+    ejecución (comprobado con el penhmain real: «Bad real number»). Antes se callaba (``tallies`` None, sin avisar:
+    duodécima revisión); ahora el volcado está dañado y no se compara nada."""
     text = full_dump().replace("spc-impdet-01.dat", "x x x")
     info = parse_dump_text(text)
     assert info.usable and info.tallies is not None  # el nombre es texto: se lee igual
     broken = full_dump().split("\n")
     broken[30] = "  no es un número"
     info = parse_dump_text("\n".join(broken))
-    assert info.usable and info.tallies is None and tally_differences(info, caja_doc()) == []
+    assert not info.usable and (info.problem, info.problem_in) == ("format", "results")
+    assert "«no»" in info.message and "línea 31" in info.message and tally_differences(info, caja_doc()) == []
 
 
 def _resume_case(tmp_path: Path, grid_z=(0.0, 5.0, 50)) -> tuple[Path, object]:
@@ -260,6 +271,10 @@ def test_with_a_real_penhmain_resume_keeps_the_grid_of_the_dump(tmp_path):
         shutil.copy(mats / md.fname.strip(), d / md.fname.strip())
     sc.set_value(doc, "NSIMSH", [300.0])
     sc.set_value(doc, "LTRACK", None)
+    dets = sc.impact_detectors(doc)
+    for det in dets:
+        det.ipsf = 0  # con el espacio de fases de un detector (IPSF 1), penhmain no puede reanudar (duodécima revisión)
+    sc.set_impact_detectors(doc, dets)
     (d / "caja.in").write_bytes(write_in_text(doc).encode("latin-1"))
 
     def run() -> None:
@@ -278,7 +293,12 @@ def test_with_a_real_penhmain_resume_keeps_the_grid_of_the_dump(tmp_path):
     doc = parse_in_file(d / "caja.in")
     assert any("toma del volcado las rejillas" in m.message for m in validate_case(doc, None, d))
     run()
+    from argus.results.summary import read_summary
+
     assert "Simulation has been resumed" in (d / "penhmain.dat").read_text(encoding="latin-1")
+    # (Que el resumen tenga las 600: hasta 0.17.3, con IPSF 1, penhmain se detenía al escribir y el mapa era el de la
+    # primera ejecución, que también tiene 25 capas.)
+    assert read_summary(d / "penhmain-res.dat").showers == 600
     head = (d / "3d-dose-map.dat").read_text(encoding="latin-1")[:2000]
     assert "NBZ =  25" in head  # la rejilla del volcado, no los 50 intervalos del .in
 

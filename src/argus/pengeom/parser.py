@@ -376,6 +376,26 @@ def _parse_clone(reader: _Reader, idx0: int, rec0: str) -> CloneElement:
     return el
 
 
+def _hidden(c: str) -> bool:
+    return not c.isprintable() or c == "\xa0"
+
+
+def visible_name(name: str) -> str:
+    """El nombre de un fichero para un mensaje, con lo que no se ve escrito: ``\\t``, ``\\xa0``… (undécima
+    revisión)."""
+    return "".join(("\\t" if c == "\t" else f"\\x{ord(c):02x}" if ord(c) < 256 else f"\\u{ord(c):04x}")
+                   if _hidden(c) else c for c in name)
+
+
+def hidden_chars_note(name: str) -> str:
+    """Si el nombre tiene caracteres que no se ven (un tabulador, un espacio duro…), lo dice: PENGEOM solo quita los
+    espacios y los demás son parte del nombre."""
+    if not any(_hidden(c) for c in name):
+        return ""
+    return (" El nombre tiene caracteres que no se ven (tabulador, espacio duro…): PENGEOM solo quita los espacios y "
+            "los toma como parte del nombre.")
+
+
 def _read_filename_line(reader: _Reader, keyword: str, code_fmt: int, code_kw: int) -> tuple[int, str]:
     idx, rec = reader.read_nc()
     if rec[8] != "(" or rec[21] != ")":
@@ -385,7 +405,9 @@ def _read_filename_line(reader: _Reader, keyword: str, code_fmt: int, code_kw: i
     if rec[:8] != keyword:
         reader.error(idx, f"Se esperaba '{keyword.strip()}'.", code_kw, "GEOMIN: What do you mean?")
         raise _Abort()
-    name = rec[9:21].lstrip().rstrip()
+    # GEOMIN quita los blancos del principio (GFILE(1:1).EQ.' ') y OPEN/INQUIRE los del final: solo espacios; un
+    # tabulador o un espacio duro son parte del nombre, y ese fichero no existe (undécima revisión).
+    name = rec[9:21].lstrip(" ").rstrip(" ")
     return idx, name
 
 
@@ -537,7 +559,8 @@ def load_includes(main: GeoDocument, base: Path, loader: Callable[[str], str] | 
                 else:
                     text = target.read_bytes().decode("latin-1")
             except OSError:
-                main.diagnostics.error(f"No existe el fichero incluido '{el.filename}'.",
+                main.diagnostics.error(f"No existe el fichero incluido '{visible_name(el.filename)}'."
+                                       + hidden_chars_note(el.filename),
                                        file=main.path, line=el.file_line)
                 continue
             sub = parse_geo_text(text, str(target), included=True)

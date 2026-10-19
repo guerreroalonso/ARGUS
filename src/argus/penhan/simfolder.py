@@ -37,6 +37,7 @@ from __future__ import annotations
 import fnmatch
 import hashlib
 import os
+import posixpath
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -456,7 +457,7 @@ def plan_folder(in_path: str | os.PathLike, doc: InDocument, dest: str | os.Path
         add("eprof", ln.text, [src])
     res = doc.first("RESUME")
     if res is not None and res.text.strip():
-        add("dump", res.text, [src], required=False, note="si no está, penhmain empieza desde cero")
+        add("dump", res.text, [src], required=False)
     add("txt", "materiales.txt", [src], required=False, note="no la usa penhmain: cómo generar los .mat")
     if penhmain:
         exe = Path(penhmain)
@@ -483,8 +484,18 @@ def plan_folder(in_path: str | os.PathLike, doc: InDocument, dest: str | os.Path
             continue
         if it.source is None:
             it.status = "missing"
-            if not it.required and it.kind in ("txt", "ctjson", "dump"):
+            if not it.required and it.kind in ("txt", "ctjson"):
                 it.status = ""  # opcional y no está: no se menciona
+            elif it.kind == "dump":
+                # Sin volcado, penhmain lo crea y empieza desde cero; pero si tampoco está su carpeta, no puede ni
+                # abrirlo y se detiene (duodécima revisión: el que faltaba no salía en la lista).
+                sub = posixpath.dirname(_posix(it.name))
+                if not sub or (dest / sub).is_dir() or (in_place and (src / sub).is_dir()):
+                    it.note = "no está: penhmain empezará desde cero"
+                else:
+                    it.note = (f"no está, ni su carpeta ({sub}): penhmain no podría abrirlo y se detendría al empezar "
+                               "(cree la carpeta o quite RESUME)")
+                    plan.notes.append(f"RESUME: {it.name} {it.note}.")
             continue
         if it.where == "absolute":
             it.status = "absolute"

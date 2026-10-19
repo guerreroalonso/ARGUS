@@ -138,6 +138,24 @@ def _locate1(x, y, z, u, v, w, nbodys, coef, kplane, cons_ptr, cons_ks, cons_kf,
         kb0 = descend
 
 
+@njit(cache=True, nogil=True)
+def _relocate(kb, x, y, z, u, v, w, nbodys, coef, kplane, cons_ptr, cons_ks, cons_kf, dght_ptr, dght, dok, ndght,
+              ks_force, side_force):
+    """LOCATE tras cruzar la superficie ``ks_force`` desde el cuerpo ``kb``. Desde fuera, como STEP de PENGEOM: solo se
+    entra por la raíz, si el punto está dentro de sus superficies (pengeom.f, «The particle enters from outside the
+    enclosure»); LOCATE no las mira y, en una geometría con una hija que asoma de su módulo raíz, se entraba en lo
+    que asoma (undécima revisión)."""
+    kn = _locate1(x, y, z, u, v, w, nbodys, coef, kplane, cons_ptr, cons_ks, cons_kf, dght_ptr, dght, dok, ndght,
+                  ks_force, side_force)
+    if kb > nbodys and kn <= nbodys:
+        for c in range(cons_ptr[nbodys], cons_ptr[nbodys + 1]):
+            ks = cons_ks[c]
+            sd = side_force if ks == ks_force else _side1(coef, kplane, ks, x, y, z, u, v, w)
+            if sd != cons_kf[c]:
+                return kb
+    return kn
+
+
 MEM = 16  # superficies cruzadas cuyo corte siguiente se recuerda
 
 
@@ -277,8 +295,8 @@ def _trace(x0, y0, z0, u, v, w, nbodys, coef, kplane, cons_ptr, cons_ks, cons_kf
         x = x0 + t * u
         y = y0 + t * v
         z = z0 + t * w
-        kn = _locate1(x, y, z, u, v, w, nbodys, coef, kplane, cons_ptr, cons_ks, cons_kf, dght_ptr, dght, dok,
-                      ndght, ks, sd)
+        kn = _relocate(kb, x, y, z, u, v, w, nbodys, coef, kplane, cons_ptr, cons_ks, cons_kf, dght_ptr, dght, dok,
+                       ndght, ks, sd)
         if kn == kb and not (all_crossings and kb <= nbodys):
             continue
         kb = kn
@@ -413,7 +431,7 @@ def _ct_first(x0, y0, z0, u, v, w, t0, t1, ct_i, ct_f, ct_mat, mat_vis, clip_on,
             tol = 1e-9 * (1.0 + abs(c_hi))
             if clip_on and abs(t - c_hi) <= tol and c_hi < tn:
                 return c_hi, -2  # plano entre vóxeles sobre el del corte: la cara del corte
-            if not clip_on or t < c_lo or t >= c_hi:
+            if not clip_on or t < c_lo - 1e-9 * (1.0 + abs(c_lo)) or t >= c_hi:  # (tolerancia: undécima revisión)
                 return t, face
             if c_hi < tn - tol:  # el corte acaba dentro de este vóxel (si acaba en su cara, se ve el siguiente)
                 return c_hi, -2
@@ -469,7 +487,7 @@ def _ct_color(x0, y0, z0, u, v, w, t0, t1, ks_in, ct_i, ct_f, ct_mat, mat_rgba, 
             if clip_on and abs(t - c_hi) <= tol and c_hi < tn:
                 kf = -2  # plano entre vóxeles sobre el del corte: la cara del corte
                 vis = True
-            elif not clip_on or t < c_lo or t >= c_hi:
+            elif not clip_on or t < c_lo - 1e-9 * (1.0 + abs(c_lo)) or t >= c_hi:
                 vis = True
             elif c_hi < tn - tol:  # el corte acaba dentro de este vóxel (si acaba en su cara, se ve el siguiente)
                 kf = -2
@@ -573,9 +591,16 @@ def _first_visible(x0, y0, z0, u, v, w, nbodys, coef, kplane, cons_ptr, cons_ks,
                 return tv, kb, ks_in if face == -1 else 0
         elif kb <= nbodys and vis[kb] == 1:
             # Tramo visible [t, t_end) menos el intervalo oculto.
-            if not clip_on or t < c_lo or t >= c_hi:
+            # Con tolerancia (undécima revisión): si el corte cae justo en el plano donde empieza este cuerpo (la
+            # cara de una hija, la del CTBOX…), es la cara del corte; sin ella, el redondeo pintaba unos píxeles
+            # como cara del corte del cuerpo de antes y otros como superficie de este (moteado). Lo mismo en el
+            # principio de lo oculto (c_lo).
+            tol_hi = 1e-9 * (1.0 + abs(c_hi)) if c_hi < INF else 0.0
+            if clip_on and c_hi < INF and abs(t - c_hi) <= tol_hi:
+                return c_hi, kb, -1 - c_plane
+            if not clip_on or t < c_lo - 1e-9 * (1.0 + abs(c_lo)) or t >= c_hi:
                 return t, kb, ks_in
-            if c_hi < t_end:
+            if c_hi < t_end - tol_hi:
                 return c_hi, kb, -1 - c_plane
         if ks == 0:
             break
@@ -584,8 +609,8 @@ def _first_visible(x0, y0, z0, u, v, w, nbodys, coef, kplane, cons_ptr, cons_ks,
         x = x0 + t * u
         y = y0 + t * v
         z = z0 + t * w
-        kn = _locate1(x, y, z, u, v, w, nbodys, coef, kplane, cons_ptr, cons_ks, cons_kf, dght_ptr, dght, dok,
-                      ndght, ks, sd)
+        kn = _relocate(kb, x, y, z, u, v, w, nbodys, coef, kplane, cons_ptr, cons_ks, cons_kf, dght_ptr, dght, dok,
+                       ndght, ks, sd)
         if kn != kb:
             kb = kn
             ks_in = ks
@@ -676,9 +701,13 @@ def _color_ray(x0, y0, z0, u, v, w, nbodys, coef, kplane, cons_ptr, cons_ks, con
         elif kb <= nbodys and colors[kb, 3] > 0.0 and not drawn:
             tv = -1.0
             kf = ks_in
-            if not clip_on or t < c_lo or t >= c_hi:
+            tol_hi = 1e-9 * (1.0 + abs(c_hi)) if c_hi < INF else 0.0  # (como en _first_visible)
+            if clip_on and c_hi < INF and abs(t - c_hi) <= tol_hi:
+                tv = c_hi
+                kf = -1 - c_plane
+            elif not clip_on or t < c_lo - 1e-9 * (1.0 + abs(c_lo)) or t >= c_hi:
                 tv = t
-            elif c_hi < t_end:
+            elif c_hi < t_end - tol_hi:
                 tv = c_hi
                 kf = -1 - c_plane
             if tv >= 0.0:
@@ -726,8 +755,8 @@ def _color_ray(x0, y0, z0, u, v, w, nbodys, coef, kplane, cons_ptr, cons_ks, con
         x = x0 + t * u
         y = y0 + t * v
         z = z0 + t * w
-        kn = _locate1(x, y, z, u, v, w, nbodys, coef, kplane, cons_ptr, cons_ks, cons_kf, dght_ptr, dght, dok,
-                      ndght, ks, sd)
+        kn = _relocate(kb, x, y, z, u, v, w, nbodys, coef, kplane, cons_ptr, cons_ks, cons_kf, dght_ptr, dght, dok,
+                       ndght, ks, sd)
         if kn != kb:
             kb = kn
             ks_in = ks

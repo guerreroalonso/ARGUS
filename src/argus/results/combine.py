@@ -20,6 +20,7 @@ las primarias de ese destino, PRIM(I).
 from __future__ import annotations
 
 import copy
+import math
 from dataclasses import replace
 
 import numpy as np
@@ -206,11 +207,42 @@ def combine_summaries(summaries: list[Summary]) -> Summary:
         pairs = [(d, n) for d, n in keep if n > 0]
         out.events[w] = _pool_dict([d for d, _ in pairs], [n for _, n in pairs]) if pairs else \
             {k: Measure(0.0, 0.0, m.unit) for k, m in summaries[0].events[w].items()}
+    _penhmain_fractions(out, summaries)
     out.dose_efficiency = out.dose_intrinsic = out.dose_uncertainty_pct = None
     out.last_seeds = None
     out.complete = all(s.complete for s in summaries)
     out.date = max((s.date for s in summaries), default="")
     return out
+
+
+def _penhmain_fractions(out: Summary, summaries: list[Summary]) -> None:
+    """Las fracciones que salen hacia arriba y hacia abajo, como penhmain-sum: penhmain escribe su incertidumbre como
+    la suma de la de las primarias que salen y la de las secundarias de su tipo (ERR = ERR1 + ERR2, penhmain.f
+    5558-5570), no como la de una sola magnitud (duodécima revisión: ARGUS daba un 8 % menos). De cada ejecución se
+    rehacen los cuadrados de las dos partes (PRIM2 y SEC2) con lo que escribe (la incertidumbre de la fracción, la de
+    las secundarias de la tabla y el número de primarias) y se suman. Con protones o alfas (sus secundarias no están
+    en la tabla), se queda como estaba."""
+    kp = out.kparp
+    if kp not in (1, 2, 3) or any(s.kparp != kp for s in summaries):
+        return
+    for w in ("up", "down"):
+        n = prim = prim2 = sec = sec2 = 0.0
+        for s in summaries:
+            f, m, p, ns = s.fractions.get(w), s.secondaries.get((kp, w)), s.primaries.get(w), s.showers
+            if f is None or m is None or p is None or ns <= 0:
+                return
+            e2 = m.err  # (1 sigma: lo escrito entre 3)
+            e1 = max(f.err - e2, 0.0)
+            sr = m.value * ns
+            n += ns
+            prim += p
+            prim2 += (e1 * ns) ** 2 + p * p / ns
+            sec += sr
+            sec2 += (e2 * ns) ** 2 + sr * sr / ns
+        if n <= 0 or w not in out.fractions:
+            continue
+        err = (math.sqrt(abs(prim2 - prim * prim / n)) + math.sqrt(abs(sec2 - sec * sec / n))) / n
+        out.fractions[w] = Measure((prim + sec) / n, err, out.fractions[w].unit)
 
 
 def combine(items: list[tuple[float, object]]):

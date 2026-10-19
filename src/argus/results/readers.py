@@ -81,6 +81,35 @@ def _curves(kind: str, x: np.ndarray, series: list[Series], x_name: str, x_unit:
 # Dosis
 # ---------------------------------------------------------------------------
 
+def _dose_curve_edges(path: Path, axis: str, centers: np.ndarray) -> np.ndarray | None:
+    """Bordes de una curva de la rejilla de dosis (depth-dose, x-, y-, z-dose) sacados de la rejilla de la misma
+    carpeta: gnu-dose.dat (caja: XL, DX…) o la cabecera de 2d-dose-map.dat (cilindro: ZL, ZU). Con un solo intervalo
+    sus centros no dicen su anchura. Solo si casan con los centros de la curva (si no, None)."""
+    n = len(centers)
+    edges = None
+    try:
+        gnu = path.with_name("gnu-dose.dat")
+        if gnu.is_file():
+            kv = key_values(read_text(gnu))
+            lo, d = kv.get(axis.upper() + "L"), kv.get("D" + axis.upper())
+            if lo is not None and d is not None and d > 0:
+                edges = lo + d * np.arange(n + 1)
+        if edges is None and axis == "z":
+            cyl = path.with_name("2d-dose-map.dat")
+            if cyl.is_file():
+                lines = _head_lines(cyl)
+                zl, zu, nbz = header_number(lines, "ZL ="), header_number(lines, "ZU ="), header_int(lines, "NBZ =")
+                if None not in (zl, zu, nbz) and nbz == n:
+                    edges = np.linspace(zl, zu, n + 1)
+    except (OSError, ValueError):
+        return None
+    if edges is None or not np.all(np.isfinite(edges)):
+        return None
+    mid = 0.5 * (edges[:-1] + edges[1:])
+    tol = 1e-5 * max(float(np.max(np.abs(edges))), float(edges[-1] - edges[0]))
+    return edges if np.all(np.abs(mid - centers) <= tol) else None
+
+
 def read_depth_dose(path: Path, ident: Identified) -> Curves:
     t = load_table(path)
     _need_cols(t, 3, path)
@@ -89,8 +118,9 @@ def read_depth_dose(path: Path, ident: Identified) -> Curves:
     meta = {"note": "Incertidumbre subestimada (lo advierte penhmain)."} if ct else {}
     if not ct:
         meta["note"] = "Correcta solo si cada capa en Z tiene densidad uniforme."
+    edges = None if ct else _dose_curve_edges(path, "z", t[:, 0])
     return _curves(ident.kind, t[:, 0], [s], "profundidad" if ct else "z", "cm", "Dosis en profundidad",
-                   "eV·cm²/g", meta=meta)
+                   "eV·cm²/g", edges=edges, histogram=edges is not None or len(t) > 1, meta=meta)
 
 
 def read_axis_dose(path: Path, ident: Identified) -> Curves:
@@ -101,7 +131,10 @@ def read_axis_dose(path: Path, ident: Identified) -> Curves:
     meta = {"axis": axis}
     if ident.kind.startswith("ct-"):
         meta["ct_local"] = True
-    return _curves(ident.kind, t[:, 0], [s], axis, "cm", "Dosis", "eV/g", meta=meta)
+    edges = None if ident.kind.startswith("ct-") else _dose_curve_edges(path, axis, t[:, 0])
+    # (Un solo intervalo sin la rejilla al lado: su anchura no se sabe; un punto, no un escalón inventado.)
+    return _curves(ident.kind, t[:, 0], [s], axis, "cm", "Dosis", "eV/g", edges=edges,
+                   histogram=edges is not None or len(t) > 1, meta=meta)
 
 
 def _check_header(path: Path, limits, counts) -> None:

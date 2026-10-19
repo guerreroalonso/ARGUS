@@ -231,6 +231,8 @@ def _fword(buf: str) -> tuple[str | None, str]:
 
 
 _WHITESPACE_NAMES = {"\t": "un tabulador", "\xa0": "un espacio no separable (NBSP)"}
+# Los nombres de fichero (A20) de lo que escribe penhmain (los demás son de lo que lee).
+OUTPUT_A20 = {"DUMPTO", "IDSPC", "IDPSF", "IDFLNC", "IDAGEF", "ADSPC", "EDSPC"}
 _COMMENT_START = "[(!#;{"
 _DECIMAL_COMMA = re.compile(r"(\d+),(\d+)")
 _MORE_NUMBERS = re.compile(r"[ \t]*,?[ \t]*[+-]?\.?\d")
@@ -249,8 +251,12 @@ def _parse_a20(line: InLine, buf: str) -> None:
                       "incluye en el nombre (solo quita los espacios finales) y no encontrará el fichero. Separe el "
                       "comentario con espacios.")
     elif name[:1].isspace() and shown:
-        line.warning = ("El nombre de fichero no empieza en la columna 8: penhmain conserva los "
-                        "blancos iniciales y no encontrará el fichero.")
+        if line.kw.strip() in OUTPUT_A20:  # un fichero que escribe penhmain: no lo busca, lo crea con ese nombre
+            line.warning = ("El nombre de fichero no empieza en la columna 8: penhmain conserva los blancos iniciales "
+                            f"y escribirá «{line.text}» (con el blanco delante).")
+        else:
+            line.warning = ("El nombre de fichero no empieza en la columna 8: penhmain conserva los "
+                            "blancos iniciales y no encontrará el fichero.")
     elif any(c.isspace() for c in shown):
         # penhmain lee las columnas 8-27 enteras (A20): un nombre con espacios vale tal cual. Solo es
         # un error si lo que sigue al espacio es un comentario que empieza antes de la columna 28.
@@ -1131,6 +1137,18 @@ class InDocument:
                 pos = i
         if pos is None:
             return 1 if self.lines else 0
+        # Tras la palabra anterior, comentarios (la cabecera de la sección siguiente, «>>>>>>>> Job properties.») y
+        # luego una palabra de la sección de la nueva: la nueva va con ella, tras la cabecera (duodécima revisión:
+        # RESUME quedaba encima de «Job properties», en la sección anterior).
+        sec = SPEC[keyword.ljust(6)].section
+        prev = SPEC.get(self.lines[pos].kw)
+        j = pos + 1
+        while j < len(self.lines) and ORDER.get(self.lines[j].kw) is None:
+            j += 1
+        if pos + 1 < j < len(self.lines):
+            nxt = SPEC.get(self.lines[j].kw)
+            if nxt is not None and sec and nxt.section == sec and (prev is None or prev.section != sec):
+                return j
         return pos + 1
 
     def set(self, keyword: str, values: list | None = None, *, text: str | None = None,

@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import html
 from dataclasses import dataclass
-from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
@@ -32,7 +31,6 @@ from PySide6.QtWidgets import (
 from ..core.numfmt import fmt_int, plural
 from ..penhan import goals as gl
 from ..penhan import sections as sc
-from ..penhan.dumpfile import read_dump, tally_differences
 from .deferred import DeferredEdits
 from .screen_fit import fit_to_screen
 from .sim_outputs import AngularSection, DoseSection, EnergySection, ImpactSection, Section
@@ -79,13 +77,20 @@ class FollowSection(Section):
         super().__init__(parent)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(4, 2, 4, 4)
-        self.every = NumberEdit(minimum=0.0, width=80, tooltip="DUMPP: cada cuántos segundos escribe penhmain los "
-                                                               "resultados (de 30 s a un día)")
+        self.every = NumberEdit(minimum=0.0, width=80, allow_empty=True,
+                                tooltip="DUMPP: cada cuántos segundos escribe penhmain los resultados y el volcado (de "
+                                        "30 s a un día; 0 o vacío: no seguirla)")
+        # 0 o vacío: como desmarcar la tarjeta (duodécima revisión: vacío era «no es un número» y 0 dejaba DUMPTO).
         self.every.valueEdited.connect(lambda v: self.edit("Periodo de volcado", lambda d: sc.set_value(
-            d, "DUMPP", [v] if v else None)))
+            d, "DUMPP", [v])) if v else self._unfollow())
+        self.every.cleared.connect(self._unfollow)
         self.dump = NameEdit("dump.dmp")
-        self.dump.nameEdited.connect(lambda t: self.edit("Volcado", lambda d: sc.set_text(d, "DUMPTO", t)))
+        self.dump.nameEdited.connect(lambda t: self.edit("Fichero del volcado",
+                                                         lambda d: sc.set_text(d, "DUMPTO", t)))
         lay.addWidget(row("Cada", self.every, "s, con el volcado en", self.dump))
+
+    def _unfollow(self) -> None:
+        self.edit("Quitar: Seguir la simulación", gl.unfollow)
 
     def refresh(self) -> None:
         doc = self.doc
@@ -127,28 +132,33 @@ CARDS = [
          "(θ y φ), solo con más de un intervalo de φ.",
          always=True),
     Card("seguir", "Seguir la simulación mientras corre",
-         "Todos los resultados y un volcado cada DUMPP segundos: ARGUS los va enseñando y la simulación se puede "
-         "reanudar (RESUME)."),
+         "Todos los resultados y un volcado cada DUMPP segundos: ARGUS los va enseñando y, si se interrumpe, la "
+         "simulación se puede reanudar (RESUME; no con un detector de impacto que escribe espacio de fases, IPSF 1)."),
 ]  # (las lluvias para verlas en 3D se eligen al ejecutar: «Lluvias», de 1 a 1000)
 CARDS_BY_KEY = {c.key: c for c in CARDS}
 
 
 def resume_note(doc, folder) -> str:
     """Con RESUME y un volcado que penhmain va a seguir, lo que se elige aquí no cuenta: penhmain toma del volcado las
-    rejillas y los intervalos de los resultados (HENANR, IMDETR, ANDETR, ENDETR y DOSER). Se dice, y qué no
-    coincide."""
-    name = sc.text(doc, "RESUME")
-    if not name or folder is None:
-        return ""
-    info = read_dump(Path(folder) / name)
-    if not info.usable or info.title != doc.model.title[:65].rstrip():
+    rejillas, los intervalos y los detectores de los resultados (HENANR, IMDETR, ANDETR, ENDETR y DOSER). Se dice, y
+    qué no coincide (lo mismo que los mensajes: ``resume.resume_outcome``)."""
+    from ..penhan import resume as rs
+
+    out = rs.resume_outcome(doc, folder)
+    if out is None or not out.follows:
         return ""  # penhmain empieza de cero (o se detiene: lo dice el panel de mensajes)
-    text = (f"Se reanuda la simulación de {html.escape(name)} (RESUME): penhmain sigue con los resultados que pidió "
-            "entonces, con sus rejillas y sus intervalos, y no con los de aquí. Para que cuenten los cambios, quite "
-            "RESUME (panel «Simulación», sección «Trabajo») y empiece de cero.")
-    diffs = tally_differences(info, doc)
-    if diffs:
-        text += " Ahora no coinciden: " + html.escape("; ".join(diffs)) + "."
+    name = html.escape(out.shown)
+    lead = (f"Se reanuda la simulación de {name} (RESUME)" if out.action == rs.CONTINUE else
+            f"La simulación de {name} ya está terminada (RESUME): penhmain no simulará más y")
+    text = (f"{lead}: penhmain sigue con los resultados que pidió entonces, con sus rejillas, sus intervalos y sus "
+            "detectores, y no con los de aquí. Para que cuenten los cambios de los resultados (los de «Seguir la "
+            "simulación» sí cuentan), quite RESUME (panel «Simulación», sección «Trabajo») y empiece de cero."
+            if out.action == rs.CONTINUE else
+            f"{lead} vuelve a escribir los resultados que pidió entonces, con sus rejillas, sus intervalos y sus "
+            "detectores; lo que se elija aquí no cuenta. Para que cuente, quite RESUME (panel «Simulación», sección "
+            "«Trabajo») y empiece de cero.")
+    if out.tallies:
+        text += " Ahora no coinciden: " + html.escape("; ".join(out.tallies)) + "."
     return f"<span style='color:{WARN_COLOR}'>{text}</span>"
 
 
@@ -161,8 +171,9 @@ def present(doc, key: str) -> str:
         if g.kind == "invalid":
             return "líneas GRID que penhmain no acepta"
         n = sc.dose_grid_cells(g)
-        what, cells = {"box": ("caja", "vóxeles"), "cylinder": ("cilindro", "anillos"),
-                       "sphere": ("esfera", "capas")}[g.kind]
+        if g.kind == "cylinder":  # anillos × capas en z: celdas, no anillos
+            return f"cilindro, {fmt_int(g.r[1])} × {fmt_int(g.z[2])} = {fmt_int(n)} celdas"
+        what, cells = {"box": ("caja", "vóxeles"), "sphere": ("esfera", "capas")}[g.kind]
         return f"{what}, {fmt_int(n)} {cells}"
     if key == "impacto":
         dets = sc.impact_detectors(doc)
@@ -266,6 +277,10 @@ class _CardWidget(QFrame):
     def show_message(self, text: str, ok: bool = True) -> None:
         self.message.setText(f"<span style='color:{OK_COLOR if ok else BAD_COLOR}'>{html.escape(text)}</span>")
         self.message.setVisible(bool(text))
+        self.message_ok = ok
+
+    message_ok = True
+    was_on: bool | None = None  # lo que estaba marcado (un mensaje verde de marcarla no vale si se desmarca sola)
 
 
 class OutputsDialog(QDialog):
@@ -361,7 +376,7 @@ class OutputsDialog(QDialog):
         for card in CARDS:
             w = _CardWidget(card, bodies)
             w.toggled.connect(self._on_toggle)
-            w.editor.apply.connect(self._apply)
+            w.editor.apply.connect(lambda text, fn, key=card.key: self._apply(text, fn, key))
             if isinstance(w.editor, DoseSection):
                 w.editor.showGridRequested.connect(self.showGridRequested)
                 w.editor.fitRequested.connect(self.fitGridRequested)
@@ -402,6 +417,9 @@ class OutputsDialog(QDialog):
                 w.state.setText(f"<span style='color:{OK_COLOR}'>{html.escape(st)}</span>" if st and not card.always
                                 else "")
             on = bool(st) or card.always
+            if w.was_on is not None and on != w.was_on and w.message_ok:
+                w.show_message("")  # «resultados cada 60 s» de cuando se marcó, y ahora no lo está (o al revés)
+            w.was_on = on
             w.editor.setVisible(on and ok)
             if w.body_row is not None:
                 w.body_row.setVisible(not st and ok)
@@ -434,9 +452,10 @@ class OutputsDialog(QDialog):
         self.refresh()
         return True
 
-    def _apply(self, text: str, fn) -> None:
-        """Un cambio de un editor (fuera de la señal del widget que lo pide)."""
-        self._deferred.defer(lambda: self._edit(text, fn))
+    def _apply(self, text: str, fn, card: str | None = None) -> None:
+        """Un cambio de un editor (fuera de la señal del widget que lo pide). Si no se puede escribir, se dice en su
+        tarjeta, como en el panel «Simulación» (antes se descartaba sin decir nada)."""
+        self._deferred.defer(lambda: self._edit(text, fn, card))
 
     def _on_toggle(self, key: str, on: bool) -> None:
         card = CARDS_BY_KEY[key]

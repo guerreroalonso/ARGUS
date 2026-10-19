@@ -120,7 +120,7 @@ def test_outputs_dialog(qtbot, cilindro_window):
     qtbot.addWidget(dlg)
     dlg.show()
     cards = dlg.cards
-    assert cards["dosis"].check.isChecked() and "cilindro, 300 anillos" in cards["dosis"].state.text()
+    assert cards["dosis"].check.isChecked() and "cilindro, 10 × 30 = 300 celdas" in cards["dosis"].state.text()
     assert cards["dosis"].editor.isVisibleTo(dlg) and isinstance(cards["dosis"].editor, DoseSection)
     assert "trayectorias" not in cards  # (0.17.1: las lluvias para verlas en 3D son «Lluvias», al ejecutar)
     assert not cards["seguir"].check.isChecked() and not cards["seguir"].editor.isVisibleTo(dlg)

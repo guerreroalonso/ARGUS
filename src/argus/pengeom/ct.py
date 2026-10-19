@@ -226,7 +226,7 @@ def _slow_body(lines: list[str], start: int, n: int) -> tuple[np.ndarray, np.nda
             vals, j = _list_directed(lines, j, 2, ("int", "real"))  # READ(IRJ,*) MC(IA),DC(IA)
             if not _INT.fullmatch(vals[0]):  # gfortran: «Bad integer» con 1.0 o 1e0
                 raise ValueError(f"el material '{vals[0]}' no es un número entero")
-            mat[k] = int(vals[0])
+            mat[k] = to_int(vals[0])  # INTEGER*4 (gfortran: «Integer overflow»)
             den[k] = to_real(vals[1])
     except ValueError as exc:  # también CtFormatError («/» antes de tiempo, fin de fichero)
         raise CtFormatError(f"Vóxel {k + 1}: {exc}") from None
@@ -269,33 +269,84 @@ def _sample_ok(raw: bytes, count: int = 2000) -> bool:
     return True
 
 
+# Una coma que hace un valor nulo («,,» o al principio de una línea): la lectura lenta lo dice.
+_NULL_COMMA = re.compile(rb"(?m),[ \t\r]*,|^[ \t\r]*,")
+
+
+def _numbers(data: bytes) -> np.ndarray | None:
+    """Los números de ``data`` (separados por blancos) con NumPy; None si hay algo que no es un número."""
+    data = data.replace(b"D", b"E").replace(b"d", b"e")
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")  # «string or file could not be read to its end»: hay algo que no es un número
+        try:
+            return np.fromstring(data, dtype=np.float64, sep=" ")  # noqa: NPY201 - lectura de texto
+        except (ValueError, DeprecationWarning):
+            return None
+
+
+def _voxel_records_end(raw: bytes, n: int, chunk: int = 1 << 24) -> int | None:
+    """Byte donde acaba el registro del vóxel ``n`` si cada línea hasta él tiene 0 o 2 valores (un vóxel por línea);
+    None si no es así. Lo que haya detrás no lo lee PENGEOM (una línea de más al final, por ejemplo). Por trozos, para
+    no gastar memoria con un TAC grande (undécima revisión)."""
+    b = np.frombuffer(raw, dtype=np.uint8)
+    found = 0
+    pos = 0
+    total = b.size
+    while pos < total:
+        stop = min(total, pos + chunk)
+        if stop < total:  # el trozo acaba en un fin de línea
+            k = raw.rfind(b"\n", pos, stop)
+            stop = k + 1 if k >= pos else raw.find(b"\n", stop) + 1 or total
+        seg = b[pos:stop]
+        blank = (seg == 32) | (seg == 9) | (seg == 13) | (seg == 10)
+        starts = np.flatnonzero(~blank & np.concatenate(([True], blank[:-1])))
+        nl = np.flatnonzero(seg == 10)
+        counts = np.bincount(np.searchsorted(nl, starts), minlength=nl.size + 1)
+        full = counts == 2
+        if not np.all(full | (counts == 0)):
+            bad = int(np.flatnonzero(~(full | (counts == 0)))[0])
+            if found + int(full[:bad].sum()) < n:  # una línea con otro número de valores antes del último vóxel
+                return None
+        cum = found + np.cumsum(full)
+        if cum.size and cum[-1] >= n:
+            line = int(np.searchsorted(cum, n))  # línea (del trozo) del vóxel n
+            return pos + (int(nl[line]) + 1 if line < nl.size else seg.size)
+        found = int(cum[-1]) if cum.size else found
+        pos = stop
+    return None
+
+
 def _fast_body(raw: bytes, n: int) -> tuple[np.ndarray, np.ndarray] | None:
     """Dos números por línea (lo habitual): lectura con NumPy. None si el fichero no es así.
 
-    Las líneas en blanco dan igual (la lectura dirigida por lista las salta);
-    si una línea tuviera otro número de valores, Fortran descartaría o
-    esperaría valores y la cuenta total o la de los materiales enteros no
-    cuadraría: entonces se usa la lectura lenta, idéntica a GEOMIN.
+    Las líneas en blanco dan igual (la lectura dirigida por lista las salta); las comas entre los dos números
+    también (sin valores nulos), y lo que hay detrás del último vóxel no se lee. Si una línea tuviera otro número de
+    valores, Fortran descartaría o esperaría valores: entonces se usa la lectura lenta, idéntica a GEOMIN.
     """
-    # Repeticiones de Fortran («2*0.25»), comas, «/» o «!»: la lectura lenta (con NumPy anterior a 2.3, fromstring no
-    # se queja de «r*c» en la última línea y lo leería mal).
-    if b"," in raw or b"/" in raw or b"!" in raw or b"*" in raw or not _sample_ok(raw):
+    # Repeticiones de Fortran («2*0.25»), «/» o «!»: la lectura lenta (con NumPy anterior a 2.3, fromstring no se queja
+    # de «r*c» en la última línea y lo leería mal). \v y \f: NumPy y bytes.split los toman por blancos y gfortran no
+    # (Bad integer/real): la lectura lenta.
+    if b"/" in raw or b"!" in raw or b"*" in raw or b"\x0b" in raw or b"\x0c" in raw or b"'" in raw or b'"' in raw:
         return None
-    data = raw.replace(b"D", b"E").replace(b"d", b"e")
-    try:
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            arr = np.fromstring(data, dtype=np.float64, sep=" ")  # noqa: NPY201 - lectura de texto
-    except ValueError:
-        return None
-    if arr.size != 2 * n:
-        return None
+    if b"," in raw:
+        if _NULL_COMMA.search(raw):
+            return None
+        raw = raw.replace(b",", b" ")  # «1,1.0000E+00» (undécima revisión: era la lectura lenta, minutos con un TAC)
+    arr = _numbers(raw) if _sample_ok(raw) else None
+    if arr is None or arr.size != 2 * n:
+        end = _voxel_records_end(raw, n)
+        if end is None:
+            return None
+        raw = raw[:end]
+        arr = _numbers(raw)
+        if arr is None or arr.size != 2 * n:
+            return None
     arr = arr.reshape(n, 2)
     m = arr[:, 0]
-    if not np.all(np.isfinite(arr)):
-        return None
+    if not np.all(np.isfinite(arr)) or np.any(np.abs(m) > np.iinfo(np.int32).max):
+        return None  # (fuera de INTEGER*4: la lectura lenta da el error de gfortran)
     mat = m.astype(np.int32)
     if not np.array_equal(mat, m) or not _integer_materials(raw):
         return None  # la lectura lenta dice en qué vóxel está el material mal escrito
@@ -556,27 +607,60 @@ def ct_frame(geo) -> CtFrame | None:
     return CtFrame(r, np.array([dx, dy, dz], dtype=float), tuple(ct.size), tuple(ct.shape))
 
 
+_CT_EPS = 1.0e-12  # el EPS de CTLOCATE
+
+
+def _shprd(frame: CtFrame, v: np.ndarray, shift: bool) -> np.ndarray:
+    """SHPRD con IPM = +1 término a término, como PENGEOM: X = R(1,1)·X1(1) + R(2,1)·X1(2) + R(3,1)·X1(3)… (el
+    producto de matrices de NumPy redondea distinto y, en un plano entre vóxeles, cambiaba el vóxel)."""
+    r = frame.rotation
+    v = np.asarray(v, dtype=float).reshape(-1, 3)
+    if shift:
+        c0, c1, c2 = v[:, 0] - frame.shift[0], v[:, 1] - frame.shift[1], v[:, 2] - frame.shift[2]
+    else:
+        c0, c1, c2 = v[:, 0], v[:, 1], v[:, 2]
+    out = np.empty_like(v)
+    for a in range(3):
+        out[:, a] = r[0, a] * c0 + r[1, a] * c1 + r[2, a] * c2
+    return out
+
+
 def voxel_indices(frame: CtFrame, pts: np.ndarray, dirs: np.ndarray | None = None
                   ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Índices (ix, iy, iz), desde 0, del vóxel de cada punto y si está dentro de la caja.
 
-    Como CTLOCATE: un punto a menos de 1e-12 vóxeles de un plano entre vóxeles
-    se asigna al vóxel hacia el que apunta la dirección (si se da).
+    Como CTLOCATE, con su misma aritmética (undécima revisión: con «r / DX» en vez de «X·RDX», 0,3/0,1 daba
+    2,999… y otro vóxel): un punto a menos de TT = max(1e-12, 1e-12·DX) de una cara de la caja se mete dentro, y uno
+    a menos de 1e-12 vóxeles de un plano entre vóxeles va al vóxel hacia el que apunta la dirección (sin dirección,
+    o paralela al plano, como PENGEOM con U = 0).
     """
-    loc = frame.to_local(pts)
-    dv = frame.voxel
-    r = loc / dv
-    n = np.array(frame.shape)
-    inside = np.all((loc >= 0.0) & (loc <= np.array(frame.size)), axis=1)
-    idx = np.floor(r)
-    if dirs is not None:
-        dl = np.asarray(dirs, dtype=float) @ frame.rotation
-        eps = 1.0e-12
-        near_lo = np.abs(r - idx) < eps  # justo en el plano inferior del vóxel
-        near_hi = np.abs(r - (idx + 1.0)) < eps
-        idx = np.where(near_lo & (dl <= eps), idx - 1.0, idx)
-        idx = np.where(near_hi & (dl > -eps) & ~near_lo, idx + 1.0, idx)
-    idx = np.clip(idx, 0, n - 1).astype(np.int64)
+    loc = _shprd(frame, pts, True)
+    dl = np.zeros_like(loc) if dirs is None else _shprd(frame, np.broadcast_to(dirs, loc.shape), False)
+    eps = _CT_EPS
+    idx = np.empty(loc.shape, dtype=np.int64)
+    inside = np.ones(loc.shape[0], dtype=bool)
+    for a in range(3):
+        xm = float(frame.size[a])
+        na = int(frame.shape[a])
+        dx = xm / float(na)  # DX = XM/DBLE(NX)
+        rdx = 1.0 / dx  # RDX = 1.0D0/DX
+        tt = max(eps, eps * dx)
+        x = loc[:, a].copy()
+        lo = np.abs(x) < tt
+        hi = ~lo & (np.abs(x - xm) < tt)
+        x[lo] = 2.0 * tt
+        x[hi] = xm - 2.0 * tt
+        inside &= ~(x * (x - xm) > 0.0)
+        rx = x * rdx
+        ix = np.trunc(rx)
+        u = dl[:, a]
+        on_lo = np.abs(rx - ix) < eps
+        on_hi = ~on_lo & (np.abs(rx - (ix + 1.0)) < eps)
+        x = np.where(on_lo, np.where(u > eps, (ix + 2.0 * eps) * dx, (ix - 2.0 * eps) * dx), x)
+        x = np.where(on_hi, np.where(u < -eps, (ix + 1.0 - 2.0 * eps) * dx, (ix + 1.0 + 2.0 * eps) * dx), x)
+        # (PENGEOM: IX = INT(X·RDX) + 1. Junto a la cara alta con vóxeles de 1 cm o más puede salir NX + 1, fuera de
+        # la matriz; aquí, el último vóxel.)
+        idx[:, a] = np.clip(np.trunc(x * rdx), 0, na - 1).astype(np.int64)
     return idx[:, 0], idx[:, 1], idx[:, 2], inside
 
 

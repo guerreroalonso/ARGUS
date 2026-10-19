@@ -602,6 +602,7 @@ class View3D(QWidget):
     gridChanged = Signal(object, bool)  # (rejilla de dosis nueva, arrastre terminado), como en el corte 2D
     dragCancelled = Signal()  # Esc durante el arrastre de la rejilla (como en el corte 2D)
     grid_editable = True  # la rejilla de dosis se puede estirar y mover con sus asas (si hay .in)
+    grid_label = "rejilla de dosis"
     GRID_HANDLE_PX = 9.0
     MAX_LATTICE_LINES = 40  # líneas de los vóxeles por eje en cada cara (si hay más, una de cada tantas)
 
@@ -636,6 +637,8 @@ class View3D(QWidget):
         self.track_style = TrackStyle()
         self.cpu_showers: tuple[int, int] | None = None  # sin GPU, las lluvias que se dibujan (si no caben todas)
         self._cpu_depth: tuple | None = None  # (estado, mapa de profundidad) para las trayectorias sin GPU
+        self._cpu_track_image: tuple | None = None  # (estado, imagen, lluvias) de la capa sin GPU
+        self._occlusion: tuple | None = None  # (estado, puntos tapados) de las superposiciones
         # Para otras ventanas (el visor de la cascada): dibujar algo más encima (leyenda, tiempo…), sin los rótulos
         # de la vista ni el botón «Mostrar todo».
         self.overlay_painters: list = []  # funciones (QPainter, ancho, alto)
@@ -804,6 +807,9 @@ class View3D(QWidget):
         if not keep_camera:
             self.material_visibility = {}
         self._occl_cache.clear()
+        # (Otra geometría: lo guardado para la anterior sobra, aunque el trazador nuevo acabe en la misma dirección
+        # de memoria que el viejo.)
+        self._cpu_depth = self._cpu_track_image = self._occlusion = None
         if session is None or not session.ok:
             self.tracer = None
             self.canvas.invalidate("tree")
@@ -872,12 +878,13 @@ class View3D(QWidget):
         self.canvas.invalidate("camera")
 
     def set_source(self, source, active_bodies: set[int] | None = None, grids: dict | None = None,
-                   editable: bool = True) -> None:
+                   editable: bool = True, grid_editable: bool = True, grid_label: str = "rejilla de dosis") -> None:
         tint_before = self._tint()
         self.source = source
         self.source_active = set(active_bodies or ())
         self.dose_grid = grids
-        self.grid_editable = source is not None
+        self.grid_editable = source is not None and grid_editable  # (sin asas, la del volcado de RESUME)
+        self.grid_label = grid_label
         if self._tint() != tint_before:
             self._colors_changed()
         self.overlay.update()
@@ -1418,12 +1425,23 @@ class View3D(QWidget):
         pts = np.atleast_2d(np.asarray(pts, dtype=float))
         if self.tracer is None or len(pts) == 0:
             return np.zeros(len(pts), dtype=bool)
+        # Lo mismo mientras no cambie nada (undécima revisión: el trazado progresivo repinta cada ~40 ms y, con las
+        # trayectorias de «Ver sobre la geometría», se trazaban decenas de miles de rayos cada vez).
+        import hashlib
+
+        key = (self.camera.state(), id(self.tracer), tuple(map(tuple, self.clip())),
+               tuple(sorted(self.material_visibility.items())), tuple(sorted(self.hidden_bodies)), pts.shape,
+               hashlib.blake2b(np.ascontiguousarray(pts).tobytes(), digest_size=16).digest())
+        if self._occlusion is not None and self._occlusion[0] == key:
+            return self._occlusion[1]
         o, d, dist = self.camera.rays_to(pts)
         # Solo tapan los cuerpos opacos: a través de los translúcidos la fuente se ve.
         t, kb, _ = self.tracer.render(o, d, self._opaque_visibility(), self.clip(),
                                       mat_vis=self._mat_vis(opaque_only=True))
         scale = float(np.linalg.norm(self.scene_hi - self.scene_lo)) or 1.0
-        return (kb > 0) & (t < dist - 1e-6 * scale)
+        out = (kb > 0) & (t < dist - 1e-6 * scale)
+        self._occlusion = (key, out)
+        return out
 
     def paint_overlays(self, p: QPainter, w: int, h: int) -> None:
         font = QFont(self.font())
@@ -1437,8 +1455,10 @@ class View3D(QWidget):
             return
         gl = isinstance(self.canvas, GLCanvas)
         if self.track_layer is not None and (not gl or getattr(self.canvas, "track_error", None)):
-            # Sin GPU, o si la GPU no acepta el programa de las trayectorias: con QPainter.
-            self._draw_track_layer_cpu(p, w, h)
+            # Sin GPU, o si la GPU no acepta el programa de las trayectorias: con QPainter, guardado mientras no
+            # cambie nada de lo que lo decide (undécima revisión: el trazado progresivo repinta esta capa cada
+            # ~40 ms y se volvían a dibujar los 120 000 tramos cada vez: con 1000 lluvias, más de un minuto).
+            self._paint_track_layer_cpu(p, w, h)
         else:
             self.cpu_showers = None
         batch = _Batch(self, w, h)
@@ -1483,7 +1503,7 @@ class View3D(QWidget):
         """Profundidad de lo primero opaco en una rejilla de píxeles (cada ``step``), para tapar las trayectorias
         sin GPU; se calcula de nuevo solo si cambian la cámara, el tamaño, el corte o lo que se ve."""
         step = 3
-        state = (self.camera.state(), w, h, tuple(map(tuple, self.clip())),
+        state = (self.camera.state(), w, h, tuple(map(tuple, self.clip())), id(self.tracer),
                  tuple(sorted(self.material_visibility.items())), tuple(sorted(self.hidden_bodies)))
         if self._cpu_depth is not None and self._cpu_depth[0] == state:
             return self._cpu_depth[1], step
@@ -1498,6 +1518,28 @@ class View3D(QWidget):
         depth = np.where(kb > 0, tt, np.inf).reshape(ny, nx)
         self._cpu_depth = (state, depth)
         return depth, step
+
+    def _paint_track_layer_cpu(self, p: QPainter, w: int, h: int) -> None:
+        import dataclasses
+
+        dpr = float(self.devicePixelRatioF())
+        key = (self.camera.state(), w, h, dpr, id(self.tracer), id(self.track_layer),
+               getattr(self.track_layer, "uid", None), dataclasses.astuple(self.track_style),
+               tuple(sorted(self.material_visibility.items())), tuple(sorted(self.hidden_bodies)),
+               tuple(map(tuple, self.clip())))
+        cache = self._cpu_track_image
+        if cache is None or cache[0] != key:
+            img = QImage(max(1, round(w * dpr)), max(1, round(h * dpr)), QImage.Format.Format_ARGB32_Premultiplied)
+            img.setDevicePixelRatio(dpr)
+            img.fill(0)
+            q = QPainter(img)
+            try:
+                self._draw_track_layer_cpu(q, w, h)
+            finally:
+                q.end()
+            cache = self._cpu_track_image = (key, img, self.cpu_showers)
+        self.cpu_showers = cache[2]
+        p.drawImage(0, 0, cache[1])
 
     def _draw_track_layer_cpu(self, p: QPainter, w: int, h: int) -> None:
         """Las trayectorias de la cascada sin GPU: líneas con QPainter, lo tapado por la geometría opaca tenue o
@@ -1770,6 +1812,13 @@ class View3D(QWidget):
             ns = [t[2] for t in ts]
             if name == "move":
                 right, up, _ = self.camera.basis()
+                # En perspectiva, a la escala de la propia rejilla (su centro sigue al ratón), no a la del objetivo
+                # de la cámara: como «desplazar» desde 0.17.1. Con el objetivo 30 cm detrás, iba 2,4 veces más deprisa.
+                c0 = np.array([0.5 * (lo[q] + hi[q]) for q in range(3)])
+                depth = self.camera.depth_of(c0)
+                if not self.camera.ortho and depth > 0:
+                    per_px = 2.0 * depth * self.camera.tan_half() / max(1, self.canvas.height())
+                    step = nice_length(4.0 * per_px)
                 delta = (np.asarray(right) * dx - np.asarray(up) * dy) * per_px
                 for k in range(3):
                     sd = round(round(float(delta[k]) / step) * step, 12)

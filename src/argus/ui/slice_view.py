@@ -304,14 +304,18 @@ class SliceViewWidget(QWidget):
         self._recolor()
 
     grid_editable = True  # la rejilla de dosis se puede arrastrar (si hay .in)
+    grid_label = "rejilla de dosis"
 
     def set_source(self, source, active_bodies: set[int] | None = None, grids: dict | None = None,
-                   editable: bool = True) -> None:
-        """Fuente (SourceDef) y rejilla de dosis del .in que se dibujan sobre el corte."""
+                   editable: bool = True, grid_editable: bool = True, grid_label: str = "rejilla de dosis") -> None:
+        """Fuente (SourceDef) y rejilla de dosis del .in que se dibujan sobre el corte. ``grid_editable``: con asas
+        (no con la del volcado de RESUME, que es la que usará penhmain; ``grid_label`` lo dice)."""
         self.source = source
         self.source_active = set(active_bodies or ())
         self.dose_grid = grids
         self.source_editable = editable
+        self.grid_editable = grid_editable
+        self.grid_label = grid_label
         self._compose()
 
     def set_show_source(self, on: bool) -> None:
@@ -943,7 +947,7 @@ class SliceViewWidget(QWidget):
             p.setFont(f)
             p.setPen(QColor(90, 200, 255, 255))
             vox = self._voxel_text(g)
-            p.drawText(QPointF(label_at.x() + 3, label_at.y() - 4), "rejilla de dosis" + (f" · {vox}" if vox else ""))
+            p.drawText(QPointF(label_at.x() + 3, label_at.y() - 4), self.grid_label + (f" · {vox}" if vox else ""))
 
     def _draw_source(self, p: QPainter) -> None:
         from ..render.source2d import box_projection, box_section, emission, project

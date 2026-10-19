@@ -152,6 +152,17 @@ def estimate(grid: GridSpec) -> dict:
             "nz_ok": nz <= NDD, "size_cm": grid.size_mm / 10.0}
 
 
+# Memoria que usa ARGUS al importar (la rejilla en float32 y los materiales y densidades, con los trozos de tejido):
+# medida en la undécima revisión, unos 46 bytes por vóxel partiendo los tejidos y 29 sin partirlos.
+IMPORT_BYTES_PER_VOXEL = {"none": 29}
+IMPORT_BYTES_PER_VOXEL_SPLIT = 46
+
+
+def import_memory(grid: GridSpec, split: str = "auto") -> int:
+    """Bytes que necesita ARGUS para importar con esta rejilla (más el TAC, que ya está leído)."""
+    return int(grid.nvoxels) * IMPORT_BYTES_PER_VOXEL.get(split, IMPORT_BYTES_PER_VOXEL_SPLIT)
+
+
 def suggest_voxel(vol: HuVolume, lo, hi, max_voxels: int = 6_000_000,
                   choices=(1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0)) -> np.ndarray:
     """Tamaño de vóxel propuesto: el del TAC si cabe; si no, el menor cúbico de ``choices`` que cabe.

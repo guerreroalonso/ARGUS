@@ -15,15 +15,22 @@ una ejecución de prueba de una lluvia de electrones con LTRACK 99 (sin los dato
 penhmain escribe ``Files with NPSHOW = n`` con dos cifras: si guarda menos de 99, ARGUS sabe cuántas; si no, que
 guarda al menos 99, y las ejecuciones son de 99 lluvias.
 
-El .in de cada ejecución es el del caso con LTRACK y NSIMSH = sus lluvias, sin límite de tiempo y con sus semillas.
-La primera, nada más (la rejilla de dosis, EPROF y las edades gastan números aleatorios: sin ellos serían otras
-lluvias), salvo que los ficheros de resultados que el .in escribe en otra carpeta («IDPSF ../fase.psf») se quedan
-en la suya, con su nombre. Las demás, además, sin lo que solo registra resultados: rejilla de dosis, detectores de
-energía depositada y angulares, distribuciones de las partículas que salen, EPROF, volcados y el espacio de fases y
-los ficheros de los detectores de impacto (estos se quedan: con IDCUT 0 absorben lo que entra).
+El .in de cada ejecución es el del caso con LTRACK y NSIMSH = sus lluvias, sin límite de tiempo, sin volcado
+(DUMPP 1e12: sin DUMPP, penhmain vuelca igual en dump.dmp) y con sus semillas. La primera, nada más (la rejilla de
+dosis, EPROF y las edades gastan números aleatorios: sin ellos serían otras lluvias), salvo que los ficheros de
+resultados que el .in escribe en otra carpeta («IDPSF ../fase.psf») se quedan en la suya, con su nombre. Las demás,
+además, sin lo que solo registra resultados: rejilla de dosis, detectores de energía depositada y angulares,
+distribuciones de las partículas que salen, EPROF y el espacio de fases y los ficheros de los detectores de impacto
+(estos se quedan: con IDCUT 0 absorben lo que entra).
 
-Con una fuente de espacio de fases (IPSFN), cada ejecución tiene sus lluvias: la primera lee el fichero del caso
-desde el principio y cada una de las demás, un trozo con las siguientes (``argus-psf.dat``, las líneas tal cual).
+Con una fuente de espacio de fases (IPSFN), cada ejecución lee un trozo con sus lluvias (``argus-psf.dat``, las
+líneas tal cual): la primera, el principio del fichero del caso; las demás, las siguientes. Una lluvia es un grupo de
+partículas del fichero (la que tiene NSHI > 0 y las que la siguen con NSHI 0) y las lluvias pedidas son grupos: el N de
+penhmain cuenta también las lluvias de la simulación que no llegaron al espacio de fases (los saltos de NSHI), que no
+tienen nada que ver (hasta 0.17.2 se pedían en N y salían menos, con huecos al final de cada ejecución). El trozo
+acaba con la última lluvia de la ejecución: penhmain no puede pasarse, ni con la ruleta rusa de WGTWIN (al matar
+una partícula del fichero sigue leyendo dentro de la misma lluvia: con el fichero entero, la primera ejecución
+acababa más allá de su NSIMSH).
 
 **De qué lluvia es cada trayectoria** (``results.shower``): penhmain no lo escribe. Casi siempre se sabe con certeza
 (cada secundaria sale de un vértice de su madre, y la partícula de la fuente que empieza cada lluvia se reconoce),
@@ -81,6 +88,7 @@ RC_FILE = "argus-rc"
 LAUNCH_LOG = "argus-lanzador.out"
 OUTPUT = "penhmain.out"
 PSF_CHUNK = "argus-psf.dat"
+PSF_RECORD = 136  # caracteres de cada línea del espacio de fases que lee penhmain (RDPSF)
 CUT_PREFIX = "argus-corte-"  # carpetas temporales de los cortes (dentro de la de la cascada)
 CUT_ROUNDS = 3  # vueltas de cortes por ejecución (la segunda y la tercera, solo si algo no cuadra)
 PROBE_TIMEOUT = 300.0
@@ -99,7 +107,8 @@ INPUT_NAMES = {"mat": "MFNAME", "geo": "GEOMFN", "nuc": "SRNUCL", "psf": "IPSFN"
 # Lo que no cambia las trayectorias de la primera ejecución ni gasta números aleatorios: solo dice qué se registra y
 # dónde se escribe (no cuenta en la firma del caso).
 RECORD_ONLY = ("TITLE", "ENDETC", "EDSPC", "EDBODY", "ANGDET", "ADENER", "ADKPAR", "ADSPC", "NBE", "NBANGL",
-               "IDSPC", "IDPSF", "IDFLNC", "IDAGEF")
+               "IDSPC", "IDPSF", "IDFLNC", "IDAGEF", "DUMPP")  # (DUMPP: el «sin volcado» de ``cascade_doc``)
+NO_DUMP = 1.0e12  # DUMPP con el que penhmain no escribe ningún volcado (≥ 1e10)
 _NPSHOW = re.compile(r"Files with NPSHOW\s*=\s*(\S+)\s+showers")
 
 
@@ -200,6 +209,9 @@ def cascade_doc(doc: InDocument, showers: int, seeds: tuple[int, int], *, exact:
     else:
         sc.set_value(d, "NSIMSH", [float(showers)])
         sc.set_value(d, "LTRACK", [int(showers)])
+    # Sin volcado: sin DUMPP, penhmain vuelca igual en dump.dmp (una vez al día y al acabar: su DUMPP por defecto es
+    # 2e9); con DUMPP ≥ 1e10, no (penhmain.f 4235-4245). Con un TAC, cientos de MB por ejecución (duodécima revisión).
+    sc.set_value(d, "DUMPP", [NO_DUMP])
     sc.set_seeds(d, [(int(seeds[0]), int(seeds[1]))])
     return d
 
@@ -273,17 +285,62 @@ def _physics_lines(d: InDocument) -> list[str]:
     return out
 
 
-def _file_parts(in_path: Path, doc: InDocument, endf: bool = False) -> list[bytes]:
-    """Fecha y tamaño de lo que lee penhmain. Sin los ENDF (``endf``: con los que haya junto al .in, como hasta
-    0.16.1): sus nombres los dicen los .mat, que ya cuentan, y si se buscan aquí la firma depende de dónde están (en
-    la carpeta de los ENDF del usuario o, después de «Ejecutar», copiados junto al .in) y una cascada ya simulada
-    no se reutilizaba (revisión de 0.16)."""
+_CONTENT: dict[str, tuple[tuple[int, int], str]] = {}  # fichero → ((tamaño, fecha en ns), huella de su contenido)
+_SAMPLED = 512 << 20  # desde este tamaño, la huella es de trozos repartidos por el fichero (un PSF de varios GB)
+
+
+def content_sha1(path: str | os.PathLike) -> str | None:
+    """Huella del contenido de un fichero (None si no se puede leer), guardada mientras no cambien su tamaño y su
+    fecha. Hasta ``_SAMPLED``, el fichero entero; de más, su tamaño, los primeros y los últimos 16 MB y 32 trozos de
+    1 MB repartidos (leerlo entero cada vez que se abre ARGUS serían segundos)."""
+    p = os.path.abspath(path)
+    try:
+        st = os.stat(p)
+    except OSError:
+        return None
+    stamp = (st.st_size, st.st_mtime_ns)
+    hit = _CONTENT.get(p)
+    if hit is not None and hit[0] == stamp:
+        return hit[1]
+    h = hashlib.sha1()
+    try:
+        with open(p, "rb") as f:
+            if st.st_size <= _SAMPLED:
+                for chunk in iter(lambda: f.read(1 << 20), b""):
+                    h.update(chunk)
+            else:
+                h.update(f"muestras:{st.st_size}".encode())
+                block = 1 << 20
+                spans = [(0, 16 * block), (max(0, st.st_size - 16 * block), 16 * block)]
+                spans += [(k * max(0, st.st_size - block) // 33, block) for k in range(1, 33)]
+                for at, size in spans:
+                    f.seek(at)
+                    h.update(f.read(size))
+    except OSError:
+        return None
+    if len(_CONTENT) > 500:
+        _CONTENT.clear()
+    _CONTENT[p] = (stamp, h.hexdigest())
+    return _CONTENT[p][1]
+
+
+def _file_parts(in_path: Path, doc: InDocument, endf: bool = False, dated: bool = False) -> list[bytes]:
+    """Lo que lee penhmain: su contenido (la huella de :func:`content_sha1`) o, con ``dated`` (la firma de 0.16.0 a
+    0.17.2), su fecha y su tamaño: al copiar el caso sin las fechas (``cp -r``, git, un pendrive), la cascada se
+    daba por «de otro caso» y se simulaba otra vez entera (undécima revisión). Sin los ENDF (``endf``: con los que
+    haya junto al .in, como hasta 0.16.1): sus nombres los dicen los .mat, que ya cuentan, y si se buscan aquí la
+    firma depende de dónde están (en la carpeta de los ENDF del usuario o, después de «Ejecutar», copiados junto al
+    .in) y una cascada ya simulada no se reutilizaba (revisión de 0.16)."""
     parts = []
     plan = plan_folder(in_path, doc, in_path.parent, legacy=endf)
     for it in sorted(plan.items, key=lambda i: i.name.lower()):
         if it.kind in ("in", "txt", "ctjson", "exe", "dll", "dump") or it.source is None:
             continue
         if it.kind == "endf" and not endf:
+            continue
+        if not dated:
+            sha = content_sha1(it.source)
+            parts.append(f"{it.kind}:{it.name}:{sha or '?'}".encode())
             continue
         try:
             st = it.source.stat()
@@ -294,18 +351,24 @@ def _file_parts(in_path: Path, doc: InDocument, endf: bool = False) -> list[byte
 
 
 def case_signature(in_path: str | os.PathLike, doc: InDocument, exe: str | os.PathLike | None, showers: int, *,
-                   legacy: bool = False) -> str:
+                   legacy: bool = False, dated: bool = False) -> str:
     """Cambia si cambia algo que afecta a las trayectorias: las líneas del .in que cambian la física (no el trabajo,
     ni el título, ni lo que solo dice qué se registra: detectores de energía y angulares, intervalos, nombres de los
-    ficheros de resultados…), la geometría y lo que incluye, los .mat y demás ficheros que lee penhmain (fecha y
-    tamaño; los ENDF, por los .mat que los nombran), el penhmain y las lluvias pedidas. ``legacy``: la de 0.16.0 y
-    0.16.1, con los ENDF que hubiera junto al .in (para reconocer las cascadas simuladas con ellas)."""
+    ficheros de resultados…), la geometría y lo que incluye, los .mat y demás ficheros que lee penhmain (su
+    contenido; los ENDF, por los .mat que los nombran), el penhmain y las lluvias pedidas. ``dated``: la de 0.16.2 a
+    0.17.2, con la fecha y el tamaño de los ficheros; ``legacy``: la de 0.16.0 y 0.16.1, además con los ENDF que
+    hubiera junto al .in (para reconocer las cascadas simuladas con ellas).
+
+    Con un espacio de fases, desde 0.17.3 las lluvias son grupos del fichero y no el N de penhmain (ver el principio
+    del módulo): la firma lo dice, y las cascadas de antes ya no son las del caso."""
     in_path = Path(in_path)
     d = cascade_doc(doc, showers, case_seeds(doc), exact=True)
     parts = ["\n".join(_physics_lines(d)).encode("latin-1", errors="replace"), str(int(showers)).encode()]
-    parts += _file_parts(in_path, doc, endf=legacy)
+    parts += _file_parts(in_path, doc, endf=legacy, dated=dated or legacy)
     if exe:
-        parts.append((file_sha1(exe) or str(exe)).encode())
+        parts.append((content_sha1(exe) or str(exe)).encode())
+    if doc.model.source.from_psf and not (dated or legacy):
+        parts.append(b"psf:grupos")
     return _sha1(b"\n".join(parts))
 
 
@@ -331,8 +394,16 @@ def _signature_v1(in_path: Path, doc: InDocument, exe: str | os.PathLike | None,
 @dataclass
 class CascadeRun:
     folder: str  # relativa a la de la cascada (run-01…)
-    showers: int
+    showers: int  # NSIMSH (las lluvias de penhmain)
     seeds: tuple[int, int]
+    # Las lluvias que tiene, como las cuenta el visor: con un espacio de fases, sus grupos (el N de penhmain cuenta
+    # también las que no llegaron al fichero); sin él, ``showers``. None en los índices de 0.17.2 y antes: ver
+    # :func:`run_counts`.
+    groups: int | None = None
+
+    @property
+    def count(self) -> int:
+        return self.groups if self.groups is not None else self.showers
 
 
 @dataclass
@@ -373,7 +444,8 @@ def read_manifest(folder: str | os.PathLike) -> CascadeInfo | None:
     if not isinstance(data, dict) or data.get("kind") != "cascada":
         return None
     try:
-        runs = [CascadeRun(str(r["folder"]), int(r["showers"]), (int(r["seeds"][0]), int(r["seeds"][1])))
+        runs = [CascadeRun(str(r["folder"]), int(r["showers"]), (int(r["seeds"][0]), int(r["seeds"][1])),
+                           int(r["groups"]) if r.get("groups") is not None else None)
                 for r in data.get("runs", []) if ".." not in Path(str(r["folder"])).parts]
         return CascadeInfo(Path(folder), str(data.get("case", "")), str(data.get("signature", "")),
                            int(data.get("showers", 0)), int(data.get("per_run", 0)),
@@ -392,9 +464,25 @@ def cascade_matches(info: CascadeInfo, in_path: str | os.PathLike, doc: InDocume
 
 
 def signatures(in_path: str | os.PathLike, doc: InDocument, exe: str | os.PathLike | None, showers: int
-               ) -> tuple[str, str]:
-    """La firma de ahora y la de 0.16.0–0.16.1 (:func:`case_signature`): una cascada es del caso con cualquiera."""
-    return (case_signature(in_path, doc, exe, showers), case_signature(in_path, doc, exe, showers, legacy=True))
+               ) -> tuple[str, ...]:
+    """La firma de ahora (la primera: la de las cascadas nuevas), la de 0.16.2–0.17.2 y la de 0.16.0–0.16.1
+    (:func:`case_signature`): una cascada es del caso con cualquiera. Con un espacio de fases, solo la de ahora (las
+    de antes contaban otras lluvias)."""
+    new = case_signature(in_path, doc, exe, showers)
+    if doc.model.source.from_psf:
+        return (new,)
+    return (new, case_signature(in_path, doc, exe, showers, dated=True),
+            case_signature(in_path, doc, exe, showers, legacy=True))
+
+
+def psf_counted_in_n(info: CascadeInfo, in_path: str | os.PathLike, doc: InDocument,
+                     exe: str | os.PathLike | None) -> bool:
+    """¿Es una cascada de este caso con un espacio de fases simulada con ARGUS 0.17.2 o antes, que pedía las lluvias
+    en el N de penhmain (con NSHI > 1, menos de las pedidas)?"""
+    if info.version < 2 or not doc.model.source.from_psf:
+        return False
+    return info.signature in (case_signature(in_path, doc, exe, info.showers, dated=True),
+                              case_signature(in_path, doc, exe, info.showers, legacy=True))
 
 
 def find_cascades(case_folder: str | os.PathLike, case: str | None = None) -> list[CascadeInfo]:
@@ -494,20 +582,36 @@ def run_exact(run_dir: str | os.PathLike, case: str, showers: int) -> bool:
         return False
 
 
+def run_has_tracks(run_dir: str | os.PathLike) -> bool:
+    """¿Ha escrito penhmain alguna trayectoria en esta ejecución (algún .trk o ``fort.7x`` con algo)? Sin ninguna, una
+    ejecución terminada no sirve: se han borrado o el penhmain no escribe las de LTRACK."""
+    from ..results.shower import trk_files
+
+    return any(size > 0 for size in trk_files(run_dir).values())
+
+
 def cascade_progress(info: CascadeInfo) -> tuple[int, int, list[RunState]]:
     """(lluvias terminadas, lluvias pedidas, estado de cada ejecución). Una ejecución está terminada cuando penhmain
-    ha acabado y se sabe de qué lluvia es cada trayectoria (``run_exact``)."""
+    ha acabado, ha escrito sus trayectorias y se sabe de qué lluvia es cada una (``run_exact``)."""
     states = [run_state(p) for p in info.run_paths]
-    done = sum(r.showers for r, s, d in zip(info.runs, states, info.run_paths)
-               if s.status == "terminada" and run_exact(d, info.case, r.showers))
-    return done, sum(r.showers for r in info.runs), states
+    counts = run_counts(info)
+    done = sum(c for r, c, s, d in zip(info.runs, counts, states, info.run_paths)
+               if s.status == "terminada" and run_has_tracks(d) and run_exact(d, info.case, r.showers))
+    return done, sum(counts), states
 
 
 def unverified_showers(info: CascadeInfo) -> int:
     """Lluvias de ejecuciones que penhmain ha terminado pero de las que aún no se sabe de qué lluvia es cada
     trayectoria (faltan cortes)."""
-    return sum(r.showers for r, d in zip(info.runs, info.run_paths)
-               if run_state(d).status == "terminada" and not run_exact(d, info.case, r.showers))
+    return sum(c for r, c, d in zip(info.runs, run_counts(info), info.run_paths)
+               if run_state(d).status == "terminada" and run_has_tracks(d)
+               and not run_exact(d, info.case, r.showers))
+
+
+def untracked_runs(info: CascadeInfo) -> list[str]:
+    """Las ejecuciones que penhmain ha terminado sin escribir ninguna trayectoria (``run_has_tracks``)."""
+    return [r.folder for r, d in zip(info.runs, info.run_paths)
+            if run_state(d).status == "terminada" and not run_has_tracks(d)]
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -642,10 +746,12 @@ class PsfShower:
     lines: list[str]
 
 
-def psf_record(line: str) -> tuple[int, float, float, float, float, int] | None:
-    """(KPAR, E, X, Y, Z, NSHI) de una línea del espacio de fases, o None si penhmain la salta (comentario, línea en
-    blanco o que no se puede leer: ``READ(…,*,ERR=…)`` en RDPSF)."""
-    s = line.strip()
+def psf_record(line: str) -> tuple[int, float, float, float, float, int, float] | None:
+    """(KPAR, E, X, Y, Z, NSHI, WGHT) de una línea del espacio de fases, o None si penhmain la salta (comentario,
+    línea en blanco o que no se puede leer: ``READ(…,*,ERR=…) KPAR,E,X,Y,Z,U,V,W,WGHT,ILB(1:4),NSHI`` en RDPSF).
+    penhmain lee los primeros 136 caracteres de cada línea (``CHARACTER PSFR*136``): lo de después no existe para
+    él."""
+    s = line.rstrip("\r\n")[:PSF_RECORD].strip()
     if not s or s.startswith("#"):
         return None
     tok = [t for t in re.split(r"[\s,]+", s) if t]
@@ -653,16 +759,51 @@ def psf_record(line: str) -> tuple[int, float, float, float, float, int] | None:
         return None
     try:
         kpar = int(tok[0])
-        e, x, y, z = (float(t.replace("D", "E").replace("d", "e")) for t in tok[1:5])
+        e, x, y, z, _u, _v, _w, wght = (float(t.replace("D", "E").replace("d", "e")) for t in tok[1:9])
+        _ilb = [int(t) for t in tok[9:13]]
         nshi = int(tok[13])
     except ValueError:
         return None
-    return kpar, e, x, y, z, nshi
+    return kpar, e, x, y, z, nshi, wght
 
 
-def read_psf_showers(paths: list[Path], up_to: int) -> list[PsfShower]:
+def psf_window(doc: InDocument) -> tuple[float, float, int]:
+    """(WGMIN, WGMAX, NSPLIT) con que penhmain trata las partículas del espacio de fases (como en PMRDR0: WGTWIN
+    0,5 y 1,5 por defecto, aunque su ayuda diga otra cosa; IPSPLI 1). Con un peso menor que WGMIN, ruleta rusa (la
+    partícula puede no simularse); mayor que WGMAX, se divide en hasta NSPLIT copias del mismo punto."""
+    wmin, wmax, nsplit = 0.5, 1.5, 1
+    v = sc.value(doc, "WGTWIN")
+    try:
+        if v and len(v) >= 2 and v[0] is not None and v[1] is not None:
+            wmin, wmax = abs(float(v[0])), min(abs(float(v[1])), 1.0e10)
+    except (TypeError, ValueError):
+        pass
+    v = sc.value(doc, "IPSPLI")
+    try:
+        if v and v[0] is not None:
+            n = int(v[0])
+            nsplit = n if 1 < n <= 1000 else min(1000, abs(n))
+    except (TypeError, ValueError):
+        pass
+    return wmin, wmax, nsplit
+
+
+def psf_one_each(weights, window: tuple[float, float, int]) -> bool:
+    """¿Sale de cada partícula del espacio de fases exactamente una trayectoria (sin ruleta rusa ni copias)?"""
+    wmin, wmax, nsplit = window
+    for w in weights:
+        if w < wmin:
+            return False
+        if w > wmax and wmin > 0 and min(nsplit, int(min(w / wmin, 2.0e9))) > 1:
+            return False
+    return True
+
+
+def read_psf_showers(paths: list[Path], up_to: int | None = None, *, groups: int | None = None
+                     ) -> list[PsfShower]:
     """Las lluvias de los espacios de fases en el orden en que las lee penhmain (un fichero detrás de otro), hasta la
-    primera con N ≥ ``up_to`` (incluida). Una lluvia es una partícula con NSHI > 0 y las que la siguen con NSHI 0."""
+    primera con N ≥ ``up_to`` (incluida) o, con ``groups``, las ``groups`` primeras (sin límite si no se dice
+    ninguno). Una lluvia es una partícula con NSHI > 0 y las que la siguen con NSHI 0."""
     out: list[PsfShower] = []
     n = 0
     cur: PsfShower | None = None
@@ -678,7 +819,8 @@ def read_psf_showers(paths: list[Path], up_to: int) -> list[PsfShower]:
                     continue
                 nshi = rec[5]
                 if cur is None or nshi > 0:
-                    if cur is not None and cur.n >= up_to:
+                    if cur is not None and ((up_to is not None and cur.n >= up_to)
+                                            or (groups is not None and len(out) >= groups)):
                         return out
                     n += max(nshi, 0)
                     cur = PsfShower(n, [])
@@ -687,39 +829,94 @@ def read_psf_showers(paths: list[Path], up_to: int) -> list[PsfShower]:
     return out
 
 
-def split_psf(showers: list[PsfShower], per: list[int]) -> tuple[list[int], list[list[PsfShower]]]:
-    """Las lluvias del espacio de fases de cada ejecución. La primera lee el fichero del caso desde el principio y
-    penhmain para al terminar la primera lluvia con N ≥ sus lluvias; cada una de las demás, las siguientes hasta su
-    parte (en su trozo, con el NSHI de la primera partícula tal cual, los números siguen desde 0). Si el fichero no
-    tiene tantas, hay menos ejecuciones (y la última, con las que queden). Devuelve (lluvias de cada ejecución,
-    lluvias del fichero de cada una)."""
-    out_per: list[int] = []
-    out_sh: list[list[PsfShower]] = []
-    g = 0
-    n_prev = 0
-    target = 0
-    for n in per:
-        target += n
-        start = g
-        while g < len(showers):
-            g += 1
-            if showers[g - 1].n >= target:
-                break
-        if g == start:
-            break
-        sel = showers[start:g]
-        crossed = sel[-1].n >= target
-        out_per.append(n if crossed else max(1, min(n, sel[-1].n - n_prev)))
-        out_sh.append(sel)
-        n_prev = sel[-1].n
-        if not crossed:
-            break
-    return out_per, out_sh
+def split_psf(showers: list[PsfShower], cap: int | None) -> list[list[PsfShower]]:
+    """Las lluvias (grupos) del espacio de fases de cada ejecución, en orden: las siguientes mientras quepan sus
+    trayectorias. penhmain deja de escribirlas al acabar una lluvia con N > NPSHOW (``cap``), y N, contando desde
+    la última lluvia de la ejecución anterior (el trozo empieza con el NSHI de su primera partícula, tal cual), sube
+    con el NSHI de cada grupo, que salta las lluvias de la simulación que no llegaron al fichero: cada ejecución
+    tiene la siguiente mientras la anterior acabe con N ≤ ``cap`` y, como mucho, ``cap`` lluvias (None: todas en
+    una)."""
+    out: list[list[PsfShower]] = []
+    cap = max(int(cap), 1) if cap else None
+    i = 0
+    while i < len(showers):
+        prev = showers[i - 1].n if i else 0
+        j = i + 1
+        while j < len(showers) and (cap is None or (showers[j - 1].n - prev <= cap and j - i < cap)):
+            j += 1
+        out.append(showers[i:j])
+        i = j
+    return out
+
+
+def psf_nsimsh(parts: list[list[PsfShower]], k: int) -> int:
+    """NSIMSH de la ejecución ``k`` (el N de penhmain al acabar su última lluvia, contando desde la anterior; al
+    menos 1: con 0, penhmain simularía 2·10⁹)."""
+    prev = parts[k - 1][-1].n if k else 0
+    return max(1, parts[k][-1].n - prev)
+
+
+def run_psf_showers(folder: str | os.PathLike, in_name: str, showers: int | None = None) -> list[PsfShower] | None:
+    """Las lluvias del espacio de fases que lee una ejecución con su .in (su trozo o, en las cascadas de 0.17.2 y
+    antes, la primera, el fichero del caso), hasta la primera con N ≥ ``showers``. None si su fuente no es un
+    espacio de fases o no se puede leer el .in."""
+    from .inputfile import parse_in_file
+
+    folder = Path(folder)
+    try:
+        doc = parse_in_file(folder / in_name)
+    except (OSError, ValueError):
+        return None
+    src = doc.model.source
+    if not src.from_psf:
+        return None
+    paths = []
+    for n in src.psf:
+        n = n.strip()
+        if not n:
+            continue
+        absolute = PureWindowsPath(n).is_absolute() or n.startswith("/")
+        paths.append(Path(n) if absolute else folder / n.replace("\\", "/"))
+    return read_psf_showers(paths, int(showers) if showers else None)
+
+
+_COUNTS: dict[str, tuple[tuple, list[int]]] = {}
+
+
+def run_counts(info: CascadeInfo) -> list[int]:
+    """Las lluvias de cada ejecución como las cuenta el visor (:attr:`CascadeRun.count`). En los índices de 0.17.2 y
+    antes no estaban: con un espacio de fases, son los grupos que lee cada ejecución (su ``showers`` era el N de
+    penhmain); si no, ``showers``."""
+    if all(r.groups is not None for r in info.runs):
+        return [r.groups for r in info.runs]
+    key = str(info.path)
+    stamp = (tuple((r.folder, r.showers) for r in info.runs), info.case)
+    hit = _COUNTS.get(key)
+    if hit is not None and hit[0] == stamp:
+        return list(hit[1])
+    out = [r.showers for r in info.runs]
+    first = run_psf_showers(info.run_paths[0], info.case, 1) if info.runs and info.case else None
+    if first is not None:  # (todas leen un espacio de fases o ninguna: son del mismo caso)
+        for k, (r, d) in enumerate(zip(info.runs, info.run_paths)):
+            if r.groups is not None:
+                out[k] = r.groups
+                continue
+            found = run_psf_showers(d, info.case, r.showers)
+            if found is not None:
+                out[k] = len(found)
+    if len(_COUNTS) > 50:
+        _COUNTS.clear()
+    _COUNTS[key] = (stamp, out)
+    return list(out)
 
 
 def _psf_chunk(sel: list[PsfShower], first: int, last: int, names: list[str]) -> bytes:
-    head = (f"# ARGUS (cascada): lluvias {first}–{last} del espacio de fases " + ", ".join(names)
-            + "; las líneas, tal cual.\n")
+    """El trozo del espacio de fases de una ejecución (o de un corte): sus lluvias, con las líneas tal cual (en
+    latin-1, como se leen: byte a byte). La cabecera, en latin-1 (con un guion largo, que no lo es, salía
+    «lluvias 51?100»: 0.17.3)."""
+    shown = ", ".join(n.strip() for n in names)
+    head = (f"# ARGUS (cascada): las lluvias con N = {first} a {last} del espacio de fases {shown} (las líneas, "
+            "tal cual).\n")
     body = "\n".join(ln for s in sel for ln in s.lines) + "\n"
     return (head + body).encode("latin-1", errors="replace")
 
@@ -837,11 +1034,26 @@ def cut_nsimsh(run_dir: str | os.PathLike, case: str, showers: int, b: int) -> f
     return float(b)
 
 
-def write_cut_folder(run_dir: Path, cut_dir: Path, items, in_name: str, exe_name: str, nsimsh: float) -> None:
+def cut_psf(run_dir: str | os.PathLike, case: str, showers: int, b: int, folder: str = "") -> bytes | None:
+    """Con un espacio de fases, el trozo que lee el corte que para tras la lluvia ``b``: las lluvias de la ejecución
+    hasta esa, nada más. Con NSIMSH no basta: si la ruleta rusa (WGTWIN) mata la partícula de la lluvia b, penhmain
+    sigue leyendo en la misma lluvia y para más allá (undécima revisión). None si la fuente no es un espacio de
+    fases (o no tiene la lluvia b)."""
+    found = run_psf_showers(run_dir, case, showers)
+    if found is None or not 0 < b <= len(found):
+        return None
+    return _psf_chunk(found[:b], found[0].n, found[b - 1].n, [f"de {folder}" if folder else "de la ejecución"])
+
+
+def write_cut_folder(run_dir: Path, cut_dir: Path, items, in_name: str, exe_name: str, nsimsh: float,
+                     psf: bytes | None = None) -> None:
     """La carpeta de un corte: enlaces a lo que lee penhmain en la carpeta de la ejecución, su .in con NSIMSH =
-    ``nsimsh`` (lo demás, igual) y el guion."""
+    ``nsimsh`` (lo demás, igual) y el guion. ``psf``: con un espacio de fases, el trozo que lee el corte (las lluvias
+    de la ejecución hasta la b; ver :func:`cut_psf`)."""
     for it in items:
         if it.kind in ("in", "txt", "ctjson") or it.status in ("", "absolute", "missing", "outside", "failed"):
+            continue
+        if psf is not None and it.kind == "psf":
             continue
         name = it.name.replace("\\", "/")
         src = run_dir / name
@@ -852,9 +1064,12 @@ def write_cut_folder(run_dir: Path, cut_dir: Path, items, in_name: str, exe_name
         target = cut_dir / name
         target.parent.mkdir(parents=True, exist_ok=True)
         link_new(src, target, executable=it.kind == "exe")
-    if (run_dir / PSF_CHUNK).is_file():
-        link_new(run_dir / PSF_CHUNK, cut_dir / PSF_CHUNK)
     d = parse_in_text((run_dir / in_name).read_text(encoding="latin-1"), str(cut_dir / in_name))
+    if psf is not None:
+        write_new(cut_dir / PSF_CHUNK, psf)
+        sc.set_psf_files(d, [PSF_CHUNK])
+    elif (run_dir / PSF_CHUNK).is_file():
+        link_new(run_dir / PSF_CHUNK, cut_dir / PSF_CHUNK)
     sc.set_value(d, "NSIMSH", [float(nsimsh)])
     write_new(cut_dir / in_name, write_in_text(d).encode("latin-1", errors="replace"))
     write_new(cut_dir / RUN_SCRIPT, _run_script(exe_name, in_name), executable=True)
@@ -963,27 +1178,32 @@ def plan_cascade(in_path: str | os.PathLike, doc: InDocument, exe: str | os.Path
     # entiende las rutas de Windows: 0.16.3).
     linux = exe_info(exe).system in ("linux", "macos", "script")
     per = runs_for(showers, cap if cap else showers)
+    groups = list(per)
     psf_names = [n for n in doc.model.source.psf if n.strip()] if doc.model.source.from_psf else []
     psf_parts: list[list[PsfShower]] | None = None
     notes: list[str] = []
     if psf_names:
+        # Las lluvias pedidas son grupos del fichero (las que se ven): cada ejecución, las que le caben (split_psf) y
+        # NSIMSH, el N de penhmain al acabar la última.
         by_name = {it.name.replace("\\", "/").lower(): it.source for it in case_files.items if it.kind == "psf"}
         paths = [by_name.get(n.strip().replace("\\", "/").lower()) for n in psf_names]
-        found = read_psf_showers([p for p in paths if p is not None], sum(per))
+        found = read_psf_showers([p for p in paths if p is not None], groups=showers)
         if found:
-            per, psf_parts = split_psf(found, per)
-            if sum(per) < showers:
-                notes.append(f"El espacio de fases solo tiene {plural(sum(per), 'lluvia')}: la cascada, también.")
+            psf_parts = split_psf(found, cap)
+            per = [psf_nsimsh(psf_parts, k) for k in range(len(psf_parts))]
+            groups = [len(part) for part in psf_parts]
+            if len(found) < showers:
+                notes.append(f"El espacio de fases solo tiene {plural(len(found), 'lluvia')}: la cascada, también.")
     seeds = run_seeds(case_seeds(doc), len(per))
     folder = Path(folder) if folder is not None else new_cascade_folder(in_path.parent)
     width = max(2, len(str(len(per))))
-    runs = [CascadeRun(f"run-{i + 1:0{width}d}", n, s) for i, (n, s) in enumerate(zip(per, seeds))]
+    runs = [CascadeRun(f"run-{i + 1:0{width}d}", n, s, g) for i, (n, s, g) in enumerate(zip(per, seeds, groups))]
     docs, chunks = [], []
     for i, r in enumerate(runs):
         d = cascade_doc(base, r.showers, r.seeds, exact=i == 0)
         chunk = None
-        if psf_parts is not None and i > 0:
-            prev = psf_parts[i - 1][-1].n
+        if psf_parts is not None:  # (también la primera: ver el principio del módulo)
+            prev = psf_parts[i - 1][-1].n if i else 0
             chunk = _psf_chunk(psf_parts[i], prev + 1, psf_parts[i][-1].n, psf_names)
             sc.set_psf_files(d, [PSF_CHUNK])
         docs.append(d)
@@ -1009,7 +1229,8 @@ def write_cascade(plan: CascadePlan, cancel: Callable[[], bool] | None = None) -
         "kind": "cascada", "version": MANIFEST_VERSION, "case": plan.in_path.name, "signature": plan.signature,
         "showers": plan.showers, "per_run": max((r.showers for r in plan.runs), default=0), "cap": plan.cap,
         "penhmain": plan.exe.name, "hadrons": plan.hadrons, "created": time.time(),
-        "runs": [{"folder": r.folder, "showers": r.showers, "seeds": list(r.seeds)} for r in plan.runs],
+        "runs": [{"folder": r.folder, "showers": r.showers, "seeds": list(r.seeds), "groups": r.count}
+                 for r in plan.runs],
     }
     write_new(plan.folder / MANIFEST, json.dumps(manifest, indent=1, ensure_ascii=False).encode("utf-8"))
     chunks = plan.chunks or [None] * len(plan.runs)
@@ -1230,15 +1451,17 @@ class CascadeJob:
             if not launch.ok:
                 raise RuntimeError(f"penhmain no se puede ejecutar en este ordenador: {launch.note}")
             self.launch = launch
-        sig, old_sig = signatures(self.in_path, self.doc, self.exe, self.showers)
+        sigs = signatures(self.in_path, self.doc, self.exe, self.showers)
+        sig = sigs[0]
         if self.reuse:
             for info in find_cascades(self.in_path.parent, self.in_path.name):
-                if info.version >= MANIFEST_VERSION and info.signature in (sig, old_sig):
+                if info.version >= MANIFEST_VERSION and info.signature in sigs:
                     done, total, states = cascade_progress(info)
                     self.info = info
                     if done >= total:
+                        self._clean_cuts(info.path)  # (las de una sesión que se cerró de golpe mientras cortaba)
                         self._set(stage="terminada", text=f"Cascada ya simulada: {plural(done, 'lluvia')} "
-                                                          f"({info.path.name}).",
+                                                          f"({info.path.name})." + psf_short_note(total, info.showers),
                                   runs=states, showers_done=done, showers_total=total, folder=info.path,
                                   cap=info.cap, finished=time.time())
                         return
@@ -1391,6 +1614,11 @@ class CascadeJob:
         plan = self.plan
         assert plan is not None
         r = plan.runs[i]
+        if not run_has_tracks(dirs[i]):
+            self._exact[i] = False
+            self._cut_error[i] = ("penhmain ha terminado sin escribir ninguna trayectoria (ningún .trk): ¿escribe este "
+                                  "penhmain las de LTRACK?")
+            return
         try:
             s = load_run(dirs[i], in_name=self.in_path.name, showers=r.showers)
         except Exception as exc:  # noqa: BLE001 - un fallo al leer una ejecución no para las demás (se apunta en ella)
@@ -1433,14 +1661,15 @@ class CascadeJob:
         assert plan is not None
         r = plan.runs[i]
         nsimsh = cut_nsimsh(run_dir, self.in_path.name, r.showers, b)
-        if nsimsh is None:
+        psf = cut_psf(run_dir, self.in_path.name, r.showers, b, r.folder)
+        if nsimsh is None or (psf is None and run_psf_showers(run_dir, self.in_path.name, 1) is not None):
             self._cut_failed.setdefault(i, {})[b] = "no se sabe dónde parar"
             record_cut(run_dir, b, None, "no se sabe dónde parar")
             return
         cut_dir = Path(tempfile.mkdtemp(prefix=f"{CUT_PREFIX}{r.folder}-{b}-", dir=plan.folder))
         try:
             write_cut_folder(run_dir, cut_dir, plan.files[i].items if i < len(plan.files) else [], self.in_path.name,
-                             self.exe.name, nsimsh)
+                             self.exe.name, nsimsh, psf)
             with self._lock:
                 self._cuts_running += 1
             try:
@@ -1474,25 +1703,31 @@ class CascadeJob:
                 continue
             ok = self._exact.get(i)
             if ok is None:
-                ok = run_exact(dirs[i], self.in_path.name, r.showers)
+                ok = run_has_tracks(dirs[i]) and run_exact(dirs[i], self.in_path.name, r.showers)
             if ok:
-                done += r.showers
+                done += r.count
         return done
 
-    def _clean_cuts(self) -> None:
+    def _clean_cuts(self, folder: Path | None = None) -> None:
         """Las carpetas de cortes que se quedaron a medias (se cerró ARGUS mientras se hacían): se borran, salvo si su
-        penhmain sigue en marcha (de otra sesión de ARGUS). Son de ARGUS y no tienen nada del caso (solo enlaces)."""
+        penhmain sigue en marcha (de otra sesión de ARGUS: se borran la próxima vez, también si la cascada ya está
+        terminada, y al acabar esta; hasta 0.17.2 se quedaban para siempre). Son de ARGUS y no tienen nada del caso
+        (solo enlaces y lo que escribe penhmain)."""
         import shutil
 
-        plan = self.plan
-        assert plan is not None
+        if folder is None:
+            assert self.plan is not None
+            folder = self.plan.folder
+        with self._lock:
+            mine = {str(d) for _p, d in self._procs.values()}
         try:
-            left = [p for p in plan.folder.iterdir() if p.is_dir() and p.name.startswith(CUT_PREFIX)]
+            left = [p for p in Path(folder).iterdir() if p.is_dir() and p.name.startswith(CUT_PREFIX)]
         except OSError:
             return
         for p in left:
-            if not pid_alive(p, self.launch):
-                shutil.rmtree(p, ignore_errors=True)
+            if str(p) in mine or pid_alive(p, self.launch) or _launching(p):
+                continue
+            shutil.rmtree(p, ignore_errors=True)
 
     def _elsewhere(self, run_dir: Path) -> bool:
         """¿Está penhmain en marcha en la carpeta de esta ejecución desde otra sesión de ARGUS, o lo está lanzando
@@ -1518,7 +1753,7 @@ class CascadeJob:
             with self._lock:
                 self._others = set(others)
             return True
-        if run_state(dirs[i]).status == "terminada":
+        if run_state(dirs[i]).status == "terminada" and run_has_tracks(dirs[i]):
             self._plan_cuts(i, dirs, queue)
             return True
         return False
@@ -1529,7 +1764,9 @@ class CascadeJob:
         self._clean_cuts()
         dirs = [plan.folder / r.folder for r in plan.runs]
         states = [run_state(d) for d in dirs]
-        todo = [i for i, s in enumerate(states) if not (skip_done and s.status == "terminada")]
+        # (Una terminada sin ninguna trayectoria, otra vez: se habrán borrado.)
+        todo = [i for i, s in enumerate(states)
+                if not (skip_done and s.status == "terminada" and run_has_tracks(dirs[i]))]
         # Las que siguen en marcha desde otra sesión de ARGUS (se cerró sin parar la cascada) no se lanzan otra vez
         # (serían dos penhmain en la misma carpeta): se espera a que terminen.
         others = {i for i in todo if skip_done and states[i].status == "simulando" and pid_alive(dirs[i], self.launch)}
@@ -1537,7 +1774,7 @@ class CascadeJob:
             self._others = set(others)
         queue: list[tuple[str, int, int]] = [("run", i, 0) for i in todo if i not in others]
         jobs = self.jobs or parallel_jobs(max(len(todo), len(dirs)), plan.hadrons)
-        total = sum(r.showers for r in plan.runs)
+        total = sum(r.count for r in plan.runs)
         self._set(stage="simulando", folder=plan.folder, showers_total=total, cap=plan.cap, runs=states)
         for i, st in enumerate(states):  # las simuladas antes: ¿hace falta algún corte?
             if st.status == "terminada" and i not in todo:
@@ -1589,6 +1826,7 @@ class CascadeJob:
                 kill_pid(dirs[i], self.launch)
         for th in active.values():
             th.join(timeout=PID_WAIT + 10)
+        self._clean_cuts()  # (las de otra sesión cuyo penhmain ha acabado entretanto)
         states = [run_state(d) for d in dirs]
         done = self._exact_showers(dirs, states)
         if self._cancel.is_set():
@@ -1615,7 +1853,8 @@ class CascadeJob:
         cuts = f" y {plural(n_cuts, 'corte')}" if n_cuts else ""
         self._set(stage="terminada", text=f"Cascada simulada: {plural(done, 'lluvia')} en "
                                           f"{plural(len(dirs), 'ejecución', 'ejecuciones')} de penhmain{cuts} "
-                                          f"({_fmt_time(time.time() - self._status.started)}).",
+                                          f"({_fmt_time(time.time() - self._status.started)})."
+                                          + psf_short_note(total, plan.showers),
                   runs=states, showers_done=done, finished=time.time())
 
     def _update_text(self, dirs: list[Path], jobs: int) -> None:
@@ -1627,7 +1866,7 @@ class CascadeJob:
             running = sum(1 for i in self._procs if i >= 0)
             others = len(self._others)
             cuts_total, cuts_done, cuts_running = self._cuts_total, self._cuts_done, self._cuts_running
-        total = sum(r.showers for r in plan.runs)
+        total = sum(r.count for r in plan.runs)
         if len(dirs) == 1:
             runs = "una ejecución, " + ("terminada" if n_done else "en marcha" if running or others else "pendiente")
         else:
@@ -1645,6 +1884,24 @@ class CascadeJob:
             text += " Con protones, alfas o neutrones, cada ejecución de penhmain prepara antes los datos nucleares " \
                     "(unos minutos)."
         self._set(text=text, runs=states, showers_done=done, cuts_done=cuts_done, cuts_total=cuts_total)
+
+
+def _launching(run_dir: Path) -> bool:
+    """¿Se está lanzando penhmain en esta carpeta (``argus-rc`` vacío de hace menos de ``PID_WAIT``: el PID llega
+    después)?"""
+    rc = run_dir / RC_FILE
+    try:
+        return rc.read_text(encoding="utf-8").strip() == "" and time.time() - rc.stat().st_mtime < PID_WAIT
+    except OSError:
+        return False
+
+
+def psf_short_note(total: int, asked: int) -> str:
+    """« El espacio de fases solo tiene N lluvias.» si la cascada tiene menos de las pedidas (solo pasa con un
+    espacio de fases: no tiene más)."""
+    if 0 < total < asked:
+        return f" El espacio de fases solo tiene {plural(total, 'lluvia')} (se pidieron {fmt_int(asked)})."
+    return ""
 
 
 def _fmt_time(t: float) -> str:
@@ -1699,4 +1956,5 @@ __all__ = ["CASCADE_DIR", "CascadeInfo", "CascadeJob", "CascadePlan", "CascadeRu
            "pid_alive", "plan_cascade", "psf_record", "read_manifest", "read_npshow", "read_psf_showers",
            "run_seeds", "run_state", "runs_for", "seed_pair", "signatures", "split_psf", "start_job", "write_cascade",
            "CUT_PREFIX", "check_cut", "cut_nsimsh", "failed_cuts", "record_cut", "run_exact", "unverified_showers",
-           "write_cut_folder"]
+           "write_cut_folder", "content_sha1", "cut_psf", "psf_counted_in_n", "psf_nsimsh", "psf_short_note",
+           "run_counts", "run_has_tracks", "run_psf_showers", "untracked_runs", "psf_window", "psf_one_each"]

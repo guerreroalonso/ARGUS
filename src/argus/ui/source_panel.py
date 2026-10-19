@@ -36,7 +36,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..core.diagnostics import Severity
-from ..core.numfmt import plural
+from ..core.numfmt import fmt_num, plural
 from ..penhan import sections as sc
 from ..penhan import source_edit as se
 from ..penhan.inputfile import fmt_real
@@ -150,6 +150,12 @@ class NumberEdit(QLineEdit):
     def format(self, v: float) -> str:
         return fmt_real(v)
 
+    def _limit_text(self, v: float) -> str:
+        """Un límite para los mensajes: «0» y no «0.0» (con el formato del campo, si tiene uno propio: energías…)."""
+        if "format" in self.__dict__ or type(self).format is not NumberEdit.format:
+            return self.format(v)
+        return fmt_num(v, 6)
+
     def parse(self, text: str) -> float:
         return parse_number(text)
 
@@ -176,9 +182,9 @@ class NumberEdit(QLineEdit):
         try:
             v = self.parse(self.text())
             if self._min is not None and v < self._min:
-                raise ValueError(f"el valor mínimo es {self.format(self._min)}")
+                raise ValueError(f"el valor mínimo es {self._limit_text(self._min)}")
             if self._max is not None and v > self._max:
-                raise ValueError(f"el valor máximo es {self.format(self._max)}")
+                raise ValueError(f"el valor máximo es {self._limit_text(self._max)}")
         except ValueError as exc:
             self.setStyleSheet("QLineEdit { background: #f8d7da; }")
             self.setToolTip(str(exc))

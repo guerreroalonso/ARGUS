@@ -84,11 +84,13 @@ def test_the_cascade_input_keeps_the_transport_and_drops_the_scoring(tmp_path):
     for kw in ("GRIDX", "EPROF", "IDAGEL", "ENDETC", "ANGDET", "NBANGL"):
         assert [ln.values for ln in ex.find(sc.kw6(kw))] == [ln.values for ln in doc.find(sc.kw6(kw))], kw
     assert sc.impact_detectors(ex)[0].ipsf == 1
-    assert not ex.find("DUMPTO") and not ex.find("DUMPP") and sc.value(ex, "LTRACK") == [50]
+    # Sin volcado: DUMPP 1e12 (sin DUMPP, penhmain vuelca igual en dump.dmp; duodécima revisión).
+    assert not ex.find("DUMPTO") and sc.value(ex, "DUMPP") == [cs.NO_DUMP] and sc.value(ex, "LTRACK") == [50]
     d = cascade = cs.cascade_doc(doc, 50, (-3, 0))
     text = write_in_text(d)
-    for kw in ("GRIDX", "GRIDY", "GRIDZ", "ENDETC", "ANGDET", "EPROF", "DUMPTO", "DUMPP", "NBANGL", "NBE   "):
+    for kw in ("GRIDX", "GRIDY", "GRIDZ", "ENDETC", "ANGDET", "EPROF", "DUMPTO", "NBANGL", "NBE   "):
         assert not any(ln.kw.strip() == kw.strip() for ln in d.lines), kw
+    assert sc.value(d, "DUMPP") == [cs.NO_DUMP]
     assert sc.value(d, "LTRACK") == [50] and sc.value(d, "NSIMSH") == [50.0]
     assert sc.seeds(d) == [(-3, 0)]
     assert sc.value(d, "TIME") is None

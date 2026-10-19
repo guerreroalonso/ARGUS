@@ -44,6 +44,7 @@ from .model import (
     ParamLine,
     SurfaceElement,
 )
+from .parser import hidden_chars_note, visible_name
 from .quadric import COEF_INDEX, PI, Quadric, is_plane, reduced_to_implicit, rotshf
 
 # Dimensiones de PENGEOM_mod.
@@ -750,18 +751,19 @@ class _Compiler:
             try:
                 return self.ct_loader(filename)
             except FileNotFoundError:
-                self.fail(2106, f"No existe el fichero CT '{filename}'.",
+                self.fail(2106, f"No existe el fichero CT '{visible_name(filename)}'." + hidden_chars_note(filename),
                           "GEOMIN: CT definition file does not exist.", line)
         base = self.base_dir or Path(".")
         path = base / filename
         self.geo.ct_path = path
         if not path.is_file():
-            self.fail(2106, f"No existe el fichero CT '{filename}' en {base}.",
-                      "GEOMIN: CT definition file does not exist.", line)
+            self.fail(2106, f"No existe el fichero CT '{visible_name(filename)}' en {base}."
+                      + hidden_chars_note(filename), "GEOMIN: CT definition file does not exist.", line)
         try:
             return load_ct(path)
-        except (CtFormatError, ValueError, OSError) as exc:
-            self.fail(None, f"No se puede leer el fichero CT '{filename}': {exc}", None, line)
+        except (CtFormatError, ValueError, OSError, OverflowError, MemoryError) as exc:
+            why = "no hay memoria para leerlo" if isinstance(exc, MemoryError) else exc
+            self.fail(None, f"No se puede leer el fichero CT '{filename}': {why}", None, line)
         raise AssertionError  # pragma: no cover
 
     def ctbox(self, el: CtBoxElement) -> None:

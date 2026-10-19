@@ -9,6 +9,11 @@ Se estima en dos pasos:
 2. Muestreo con LOCATE en una rejilla que cubre esos puntos: la caja final
    es la de las celdas que caen en algún cuerpo que no sea la envolvente
    automática (esfera de radio 1e7) ni el exterior.
+3. (Undécima revisión.) La unión con la caja de cada cuerpo que sus
+   superficies acotan: la de cada superficie y, si alguna está girada, la
+   exacta (``extent.exact_box``). La rejilla no veía lo fino ni las esquinas
+   de lo girado: la copa de PenGeomJar quedaba sin el pie y el tallo, y la
+   fuente de «Nuevo .in» caía dentro del tallo.
 """
 
 from __future__ import annotations
@@ -100,12 +105,55 @@ def estimate_bounds(geo: CompiledGeometry, samples: int = 40, locator=None,
         inside = (ib <= geo.nbodys) & (ib != enc)
         if material_only:
             inside &= mat > 0
+        found = None
         if inside.any():
             sel = pts[inside]
             step = (hi2 - lo2) / (samples - 1)
-            lo3 = np.maximum(sel.min(axis=0) - step, lo2)
-            hi3 = np.minimum(sel.max(axis=0) + step, hi2)
-            return lo3, hi3
+            found = (np.maximum(sel.min(axis=0) - step, lo2), np.minimum(sel.max(axis=0) + step, hi2))
+        exact = body_boxes(geo, material_only)
+        if exact is not None:
+            if found is None:
+                return exact
+            return np.minimum(found[0], exact[0]), np.maximum(found[1], exact[1])
+        if found is not None:
+            return found
     except Exception:  # pragma: no cover - la estimación nunca debe romper la carga
         pass
     return lo, hi
+
+
+def body_boxes(geo: CompiledGeometry, material_only: bool = False) -> tuple[np.ndarray, np.ndarray] | None:
+    """La unión de las cajas de los elementos de arriba (las hijas de la raíz o de la envolvente, y la raíz si no es la
+    envolvente) que sus superficies acotan: la de cada superficie (al momento) y, si no basta (superficies giradas),
+    la exacta; de un módulo sin cota, las de lo que tiene dentro. Lo de dentro de un módulo acotado ya está en su caja.
+    None si no hay ninguno."""
+    from .extent import analytic_box, exact_box
+
+    n = geo.nbodys
+    enc = n if geo.enclosure_added else -1
+    root = n  # (la envolvente o el módulo de arriba: el último)
+    lo, hi = np.full(3, np.inf), np.full(3, -np.inf)
+    stack = [k for k in range(1, n + 1) if geo.body(k).mother == root and k != root]
+    if root != enc and 1 <= root <= n:
+        stack.append(root)
+    seen: set[int] = set()
+    while stack:
+        kb = stack.pop()
+        if kb in seen or not 1 <= kb <= n:
+            continue
+        seen.add(kb)
+        b = geo.body(kb)
+        if kb == enc or b.origin == "enclosure":
+            continue
+        a_lo, a_hi = analytic_box(geo, kb)
+        if np.any(a_hi < a_lo):
+            continue
+        if not (np.all(np.isfinite(a_lo)) and np.all(np.isfinite(a_hi))):
+            a_lo, a_hi = exact_box(geo, kb)
+        bounded = bool(np.all(a_hi >= a_lo) and np.all(np.isfinite(a_lo)) and np.all(np.isfinite(a_hi)))
+        counts = not material_only or b.material > 0
+        if bounded and counts:
+            lo, hi = np.minimum(lo, a_lo), np.maximum(hi, a_hi)
+        if b.is_module and not (bounded and counts):  # (sin cota o vacío: lo que tiene dentro)
+            stack += [d for d in b.daughters if d != kb]
+    return None if np.any(hi < lo) else (lo, hi)

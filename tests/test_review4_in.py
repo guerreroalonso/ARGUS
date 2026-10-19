@@ -121,7 +121,9 @@ def test_outputs_in_missing_folders_are_warned(tmp_path):
     text = void_in("IMPDET 0 0 100 0 1\nIDSPC  nada/spc.dat\nIDBODY 1 [b]\nDUMPTO otra/dump.dmp\n")
     _doc, _geo, d = argus(tmp_path, text, {"void.geo": VOID_GEO})
     warn = text_of(d, Severity.WARNING)
-    assert "IDSPC" in warn and "DUMPTO" in warn
+    # DUMPTO, un error desde la duodécima revisión: penhmain simularía y se detendría al hacer el primer volcado, sin
+    # escribir ningún resultado (con IDSPC, el volcado y el resumen se escriben antes: se puede reanudar).
+    assert "IDSPC" in warn and "DUMPTO" in text_of(d, Severity.ERROR)
 
 
 # ---------------------------------------------------------------------------------------------------------------------
